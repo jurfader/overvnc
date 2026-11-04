@@ -366,6 +366,18 @@ function MemberModal({
           </div>
         )}
 
+        {!member && (
+          <div className="callout callout-brand">
+            <KeyRound />
+            <div>
+              <strong>Hasło</strong>
+              <div className="small muted">
+                Po utworzeniu konta pojawi się hasło tymczasowe do przekazania tej osobie. Przy pierwszym logowaniu ustawi ona własne hasło (i 2FA, jeśli
+                rola tego wymaga).
+              </div>
+            </div>
+          </div>
+        )}
         {error && <div className="form-error">{error}</div>}
         <div className="okno-actions">
           <Button type="button" variant="ghost" onClick={onClose}>
