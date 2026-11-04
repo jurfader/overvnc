@@ -12,15 +12,26 @@ import (
 	pty "github.com/aymanbagabas/go-pty"
 )
 
-// Ramki binarne (strumienie: terminal, później pulpit i pliki):
+// Ramki binarne (strumienie: terminal, pliki, później pulpit):
 //
 //	[1 bajt: rodzaj][4 bajty: numer kanału, big-endian][dane]
+//
+// Rodzaj 2 (ack) potwierdza odebranie i ZAPISANIE danych (4 bajty: liczba bajtów) — nadawca
+// nie wysyła więcej niż okno bez potwierdzenia, więc wolny odbiorca spowalnia nadawcę,
+// zamiast zapychać pamięć serwera.
 const (
 	frameData byte = 1
+	frameAck  byte = 2
 
-	maxTerminals = 8
-	termReadBuf  = 32 * 1024
+	maxChannels = 16
+	termReadBuf = 32 * 1024
 )
+
+func encodeAck(ch uint32, n int) []byte {
+	var b [4]byte
+	binary.BigEndian.PutUint32(b[:], uint32(n))
+	return encodeFrame(frameAck, ch, b[:])
+}
 
 func encodeFrame(kind byte, ch uint32, payload []byte) []byte {
 	b := make([]byte, 5+len(payload))
@@ -62,9 +73,14 @@ func sessionFrom(ctx context.Context) (*sessionIO, error) {
 
 type stream interface {
 	write(p []byte) error
-	resize(cols, rows int) error
 	close()
 }
+
+// resizer — strumień z rozmiarem (terminal).
+type resizer interface{ resize(cols, rows int) error }
+
+// acker — strumień, który nadaje z kontrolą przepływu (pobieranie pliku).
+type acker interface{ ack(n int) }
 
 type channelManager struct {
 	mu sync.Mutex
@@ -79,8 +95,8 @@ func (c *channelManager) add(id uint32, s stream) error {
 	if _, exists := c.m[id]; exists {
 		return protoErr("channel_exists", "kanał %d jest już otwarty", id)
 	}
-	if len(c.m) >= maxTerminals {
-		return protoErr("too_many_channels", "otwartych jest już %d sesji na tym komputerze", maxTerminals)
+	if len(c.m) >= maxChannels {
+		return protoErr("too_many_channels", "otwartych jest już %d sesji na tym komputerze", maxChannels)
 	}
 	c.m[id] = s
 	return nil
@@ -111,14 +127,23 @@ func (c *channelManager) closeAll() {
 	}
 }
 
-// handleFrame — dane od serwera (np. naciśnięte klawisze) do kanału.
+// handleFrame — dane od serwera (klawisze, wysyłany plik) albo potwierdzenie odbioru.
 func (c *channelManager) handleFrame(b []byte) {
 	kind, ch, payload, err := decodeFrame(b)
-	if err != nil || kind != frameData {
+	if err != nil {
 		return
 	}
-	if s := c.get(ch); s != nil {
+	s := c.get(ch)
+	if s == nil {
+		return
+	}
+	switch kind {
+	case frameData:
 		_ = s.write(payload)
+	case frameAck:
+		if a, ok := s.(acker); ok && len(payload) == 4 {
+			a.ack(int(binary.BigEndian.Uint32(payload)))
+		}
 	}
 }
 
@@ -275,8 +300,8 @@ func handleTermResize(ctx context.Context, data json.RawMessage) (any, error) {
 	if err := json.Unmarshal(data, &req); err != nil {
 		return nil, protoErr("bad_request", "nieprawidłowe żądanie")
 	}
-	s := sess.channels.get(req.Channel)
-	if s == nil {
+	s, ok := sess.channels.get(req.Channel).(resizer)
+	if !ok {
 		return nil, protoErr("no_channel", "kanał nie istnieje")
 	}
 	cols, rows := clampSize(req.Cols, req.Rows)

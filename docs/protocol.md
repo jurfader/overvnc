@@ -27,8 +27,11 @@ Zdarzenia serwer → panel (`/ws/panel`) są filtrowane zakresem klientów zalog
 ### Ramki binarne (strumienie)
 
 ```
-[1 bajt: rodzaj = 1 (dane)][4 bajty: numer kanału, big-endian][dane]
+[1 bajt: rodzaj][4 bajty: numer kanału, big-endian][dane]
+rodzaj 1 = dane, rodzaj 2 = potwierdzenie (ack: 4 bajty — liczba bajtów)
 ```
+
+**Kontrola przepływu (pliki).** Nadawca wysyła najwyżej **2 MB** bez potwierdzenia. Odbiorca potwierdza dopiero wtedy, gdy dane naprawdę poszły dalej: serwer, gdy Node przekazał je do gniazda przeglądarki, a agent, gdy zapisał je na dysk. Wolny odbiorca spowalnia więc nadawcę i nic nie gromadzi się w pamięci serwera. Wysyłanie trafia do pliku tymczasowego `.<nazwa>.overvnc-part-*`, a `fs.commit` czeka na zapis wszystkich bajtów, synchronizuje dysk, zamyka plik i dopiero wtedy zmienia jego nazwę na docelową. Przerwane wysyłanie usuwa plik tymczasowy.
 
 Kanał otwiera serwer poleceniem (np. `term.open` z polem `channel`). Odbiorcę rejestruje **przed** wysłaniem żądania, bo agent może nadawać dane przed odpowiedzią. Ramki z kanałem, który nie należy do nadającego agenta, serwer odrzuca. Koniec strumienia po stronie agenta to zdarzenie `channel.closed { channel, exitCode }`, a zamknięcie z inicjatywy serwera to polecenie `channel.close { channel }`. Zerwanie połączenia kończy wszystkie kanały, a agent zabija wtedy swoje powłoki.
 
@@ -82,6 +85,12 @@ W `hello` agent wysyła listę obsługiwanych poleceń. Serwer odrzuca polecenie
 | `svc.control` `{name, action}` | 0.4.0 | `start`/`stop`/`restart`/`enable`/`disable`; usługa agenta chroniona |
 | `power.action` `{action, delayMinutes, message}` | 0.4.0 | zasilanie; obsługiwane akcje ogłaszane jako `power.<akcja>` |
 | `wol.send` `{macs, broadcasts}` | 0.4.0 | agent-przekaźnik wysyła magiczny pakiet (UDP 9 i 7, SO_BROADCAST) |
+| `fs.roots` | 0.5.0 | dyski (z zajętością) i skróty użytkownika (Pulpit, Dokumenty, Pobrane) |
+| `fs.list` `{path}` | 0.5.0 | zawartość katalogu (najpierw foldery, maks. 5000 pozycji) |
+| `fs.mkdir` / `fs.rename` / `fs.delete` | 0.5.0 | operacje na plikach; rename nie nadpisuje; katalogi systemowe i korzenie dysków chronione |
+| `fs.readText` / `fs.writeText` | 0.5.0 | podgląd i edycja tekstu ≤ 1 MB; zapis atomowy, zachowuje uprawnienia, wykrywa konflikt (`expectedModified`) |
+| `fs.read` `{channel, path, zip}` | 0.5.0 | strumień pobierania; katalog jako ZIP w locie (nazwy UTF-8) |
+| `fs.write` `{channel, dir, name, size, overwrite}` + `fs.commit` | 0.5.0 | strumień wysyłania do pliku tymczasowego, zatwierdzenie atomowe |
 
 W `hello` agent wysyła też `shells` (dostępne powłoki) i `runAs` (konto, na którym działa).
 

@@ -69,6 +69,29 @@ SID=$(awk '$6 == "overvnc_sid" {print $7}' "$J")
 ') || fail "terminal"
 echo "✔ terminal: polecenie w prawdziwej powłoce i zakończenie sesji"
 
+# pliki: wysłanie (> okno przepływu), lista, pobranie z porównaniem sumy, ZIP folderu, edycja tekstu, usunięcie
+FD="$WORK/pliki"; mkdir -p "$FD"
+head -c 3500000 /dev/urandom > "$WORK/src.bin"
+UP=$(curl -s -b "$J" -X POST -H 'content-type: application/octet-stream' --data-binary @"$WORK/src.bin" \
+  "$B/api/agents/$ID/files/upload?dir=$(node -pe 'encodeURIComponent(process.argv[1])' "$FD")&name=$(node -pe 'encodeURIComponent("zażółć.bin")')")
+echo "$UP" | grep -q '"path"' || fail "wysłanie pliku: $UP"
+[ "$(curl -sf -b "$J" "$B/api/agents/$ID/files?path=$(node -pe 'encodeURIComponent(process.argv[1])' "$FD")" | json '.entries.map(e=>e.name).join()')" = "zażółć.bin" ] || fail "lista po wysłaniu"
+curl -sf -b "$J" -o "$WORK/back.bin" "$B/api/agents/$ID/files/download?path=$(node -pe 'encodeURIComponent(process.argv[1])' "$FD/zażółć.bin")" || fail "pobranie"
+cmp -s "$WORK/src.bin" "$WORK/back.bin" || fail "pobrany plik różni się od wysłanego"
+[ -z "$(ls -A "$FD" | grep overvnc-part)" ] || fail "pozostał plik tymczasowy"
+curl -sf -b "$J" -o "$WORK/dir.zip" "$B/api/agents/$ID/files/download?path=$(node -pe 'encodeURIComponent(process.argv[1])' "$FD")" || fail "pobranie ZIP"
+# systemowy unzip z macOS źle wyświetla nazwy UTF-8 — sprawdzamy archiwum biblioteką zipfile
+python3 -c 'import sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); n=[i for i in z.infolist() if i.filename.endswith("zażółć.bin")]; sys.exit(0 if n and n[0].flag_bits & 0x800 and n[0].file_size == 3500000 else 1)' "$WORK/dir.zip" || fail "ZIP bez pliku lub bez flagi UTF-8"
+echo "a=1" > "$FD/konfig.ini"
+MOD=$(curl -sf -b "$J" "$B/api/agents/$ID/files/text?path=$(node -pe 'encodeURIComponent(process.argv[1])' "$FD/konfig.ini")" | json .modified)
+curl -sf -b "$J" -X PUT -H 'content-type: application/json' -d "{\"path\":\"$FD/konfig.ini\",\"content\":\"a=2\\n\",\"expectedModified\":$MOD}" "$B/api/agents/$ID/files/text" >/dev/null || fail "edycja tekstu"
+[ "$(cat "$FD/konfig.ini")" = "a=2" ] || fail "edycja nie zapisała zmian"
+CONFLICT=$(curl -s -b "$J" -X PUT -H 'content-type: application/json' -d "{\"path\":\"$FD/konfig.ini\",\"content\":\"x\",\"expectedModified\":1}" "$B/api/agents/$ID/files/text" | json .error)
+[ "$CONFLICT" = "conflict" ] || fail "brak wykrycia konfliktu edycji ($CONFLICT)"
+curl -sf -b "$J" -X POST -H 'content-type: application/json' -d "{\"paths\":[\"$FD/zażółć.bin\",\"$FD/konfig.ini\"]}" "$B/api/agents/$ID/files/delete" >/dev/null || fail "usuwanie plików"
+[ -z "$(ls -A "$FD")" ] || fail "pliki nie zostały usunięte"
+echo "✔ pliki: wysłanie 3,5 MB, pobranie (zgodne bajt w bajt), ZIP, edycja z wykryciem konfliktu, usunięcie"
+
 curl -sf -b "$J" -X DELETE "$B/api/agents/$ID" >/dev/null || fail "usuwanie"
 for _ in $(seq 50); do grep -q "odrzucił" "$WORK/agent.log" && break; sleep 0.1; done
 grep -q "odrzucił" "$WORK/agent.log" || fail "agent nie został odrzucony po usunięciu"

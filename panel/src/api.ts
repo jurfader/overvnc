@@ -100,6 +100,41 @@ export interface ServiceInfo {
   description?: string;
 }
 
+export interface FsRoot {
+  path: string;
+  label: string;
+  total?: number;
+  free?: number;
+  kind: 'drive' | 'shortcut';
+}
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  type: 'dir' | 'file' | 'other';
+  link?: boolean;
+  size: number;
+  modified: number;
+  mode: string;
+  hidden?: boolean;
+}
+
+export interface DirListing {
+  path: string;
+  parent?: string;
+  entries: FileEntry[];
+  truncated?: boolean;
+}
+
+export interface TextFile {
+  path: string;
+  size: number;
+  modified: number;
+  content?: string;
+  binary?: boolean;
+  tooLarge?: boolean;
+}
+
 export type PowerAction = 'reboot' | 'shutdown' | 'cancel' | 'logoff' | 'lock';
 export type ServiceAction = 'start' | 'stop' | 'restart' | 'enable' | 'disable';
 
@@ -280,6 +315,19 @@ export const api = {
   controlService: (id: string, name: string, action: ServiceAction) =>
     request<Ok>('POST', `/api/agents/${id}/services/${encodeURIComponent(name)}/${action}`, {}),
   power: (id: string, action: PowerAction, delayMinutes = 0, message = '') => request<Ok>('POST', `/api/agents/${id}/power`, { action, delayMinutes, message }),
+  // pliki
+  fsRoots: (id: string) => request<FsRoot[]>('GET', `/api/agents/${id}/files/roots`),
+  fsList: (id: string, path: string) => request<DirListing>('GET', `/api/agents/${id}/files?path=${encodeURIComponent(path)}`),
+  fsMkdir: (id: string, path: string) => request<{ path: string }>('POST', `/api/agents/${id}/files/mkdir`, { path }),
+  fsRename: (id: string, from: string, to: string) => request<{ path: string }>('POST', `/api/agents/${id}/files/rename`, { from, to }),
+  fsDelete: (id: string, paths: string[]) => request<{ deleted: number }>('POST', `/api/agents/${id}/files/delete`, { paths }),
+  fsReadText: (id: string, path: string) => request<TextFile>('GET', `/api/agents/${id}/files/text?path=${encodeURIComponent(path)}`),
+  fsWriteText: (id: string, path: string, content: string, expectedModified: number) =>
+    request<TextFile>('PUT', `/api/agents/${id}/files/text`, { path, content, expectedModified }),
+  downloadUrl: (id: string, path: string, zip = false) => `/api/agents/${id}/files/download?path=${encodeURIComponent(path)}${zip ? '&zip=1' : ''}`,
+  uploadUrl: (id: string, dir: string, name: string, overwrite: boolean) =>
+    `/api/agents/${id}/files/upload?dir=${encodeURIComponent(dir)}&name=${encodeURIComponent(name)}${overwrite ? '&overwrite=1' : ''}`,
+
   wakeInfo: (id: string) => request<{ possible: boolean; reason: 'no_mac' | 'no_relay' | null; relay: { id: string; name: string } | null; macs: string[] }>('GET', `/api/agents/${id}/wake`),
   wake: (id: string) => request<{ ok: true; relay: { id: string; name: string } }>('POST', `/api/agents/${id}/wake`, {}),
 

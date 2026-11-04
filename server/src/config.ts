@@ -20,6 +20,8 @@ export interface Config {
   keyFile: string | null;
   /** Wymuszaj 2FA dla właścicieli i administratorów (REQUIRE_2FA=0 wyłącza — tylko do developmentu). */
   requireMfa: boolean;
+  /** Maks. rozmiar wysyłanego pliku (MAX_UPLOAD_MB, domyślnie 10 GB). */
+  maxUploadBytes: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -35,5 +37,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     sessionTtlMs: 12 * 60 * 60 * 1000,
     keyFile: path.join(dataDir, 'secret.key'),
     requireMfa: env.REQUIRE_2FA !== '0',
+    maxUploadBytes: Number(env.MAX_UPLOAD_MB ?? 10 * 1024) * 1024 * 1024,
   };
 }

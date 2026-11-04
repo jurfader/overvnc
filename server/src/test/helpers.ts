@@ -93,16 +93,16 @@ export class FakeAgent {
   received: any[] = [];
   private waiters: { pred: (m: any) => boolean; resolve: (m: any) => void }[] = [];
   handlers: Record<string, (data: any) => any> = {};
-  frames: { channel: number; payload: Buffer }[] = [];
-  onFrame?: (channel: number, payload: Buffer) => void;
+  frames: { kind: number; channel: number; payload: Buffer }[] = [];
+  onFrame?: (channel: number, payload: Buffer, kind: number) => void;
 
   constructor(port: number, agentId: string, secret: string) {
     this.ws = new WebSocket(`ws://127.0.0.1:${port}/ws/agent`, { headers: { Authorization: `Bearer ${agentId}.${secret}` } });
     this.ws.on('message', (raw, isBinary) => {
       if (isBinary) {
         const b = raw as Buffer;
-        this.frames.push({ channel: b.readUInt32BE(1), payload: b.subarray(5) });
-        this.onFrame?.(b.readUInt32BE(1), b.subarray(5));
+        this.frames.push({ kind: b[0], channel: b.readUInt32BE(1), payload: b.subarray(5) });
+        this.onFrame?.(b.readUInt32BE(1), b.subarray(5), b[0]);
         return;
       }
       const msg = JSON.parse(raw.toString());
@@ -137,6 +137,15 @@ export class FakeAgent {
     head[0] = 1;
     head.writeUInt32BE(channel, 1);
     this.ws.send(Buffer.concat([head, Buffer.from(payload)]));
+  }
+
+  /** Potwierdzenie zapisu (kontrola przepływu wysyłania). */
+  sendAck(channel: number, bytes: number): void {
+    const b = Buffer.alloc(9);
+    b[0] = 2;
+    b.writeUInt32BE(channel, 1);
+    b.writeUInt32BE(bytes, 5);
+    this.ws.send(b);
   }
 
   hello(capabilities: string[] = []): void {

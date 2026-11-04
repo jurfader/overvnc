@@ -18,6 +18,7 @@ import { userRoutes } from './routes/users.ts';
 import { clientRoutes } from './routes/clients.ts';
 import { remoteRoutes } from './routes/remote.ts';
 import { terminalRoutes } from './routes/terminal.ts';
+import { fileRoutes } from './routes/files.ts';
 import { loadOrCreateKey } from './crypto.ts';
 
 const CSP = [
@@ -73,6 +74,7 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
   await userRoutes(app, ctx);
   await clientRoutes(app, ctx);
   await remoteRoutes(app, ctx);
+  await fileRoutes(app, ctx);
   await wsRoutes(app, ctx);
   await terminalRoutes(app, ctx);
 

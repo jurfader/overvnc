@@ -1,27 +1,29 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { Activity, ArrowLeft, Building2, Cog, LayoutDashboard, TerminalSquare, Clock, Cpu, HardDrive, Info, MemoryStick, Network, Package, Pencil, RefreshCw, Search, Trash2, Users } from 'lucide-react';
+import { Activity, ArrowLeft, Building2, Cog, FolderOpen, LayoutDashboard, TerminalSquare, Clock, Cpu, HardDrive, Info, MemoryStick, Network, Package, Pencil, RefreshCw, Search, Trash2, Users } from 'lucide-react';
 import { api, errorMessage, type Agent, type AgentDetail } from '../api.ts';
 import { Button, CardHead, ClientLabel, EmptyState, Meter, Modal, OsBadge, StatTile, Status, TagChip, toast } from '../components.tsx';
 import { useMe } from '../state.tsx';
 import { OrganizeModal } from './organize.tsx';
 import { ProcessesView } from './remote/ProcessesView.tsx';
 import { ServicesView } from './remote/ServicesView.tsx';
+import { FilesView } from './remote/FilesView.tsx';
 import { PowerMenu, WakeButton } from './remote/PowerMenu.tsx';
 import { ago, bytes, dateTime, duration, platformLabel, rate } from '../format.ts';
 
 // xterm.js waży ~400 kB — ładujemy go dopiero przy otwarciu terminala
 const TerminalView = lazy(() => import('./remote/TerminalView.tsx').then((m) => ({ default: m.TerminalView })));
 
-export type DetailTab = 'overview' | 'terminal' | 'processes' | 'services';
+export type DetailTab = 'overview' | 'terminal' | 'files' | 'processes' | 'services';
 
 const TABS: { key: DetailTab; label: string; icon: typeof Info }[] = [
   { key: 'overview', label: 'Przegląd', icon: LayoutDashboard },
   { key: 'terminal', label: 'Terminal', icon: TerminalSquare },
+  { key: 'files', label: 'Pliki', icon: FolderOpen },
   { key: 'processes', label: 'Procesy', icon: Activity },
   { key: 'services', label: 'Usługi', icon: Cog },
 ];
 
-export function MachineDetail({ id, live, tab = 'overview' }: { id: string; live: Agent | undefined; tab?: DetailTab }) {
+export function MachineDetail({ id, live, tab = 'overview', filePath = null }: { id: string; live: Agent | undefined; tab?: DetailTab; filePath?: string | null }) {
   const [detail, setDetail] = useState<AgentDetail | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [swQuery, setSwQuery] = useState('');
@@ -135,6 +137,7 @@ export function MachineDetail({ id, live, tab = 'overview' }: { id: string; live
           <TerminalView agent={a} />
         </Suspense>
       )}
+      {tab === 'files' && remote && <FilesView agent={a} initialPath={filePath} />}
       {tab === 'processes' && remote && <ProcessesView agent={a} />}
       {tab === 'services' && remote && <ServicesView agent={a} />}
       {(tab === 'overview' || !remote) && (

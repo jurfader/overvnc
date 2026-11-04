@@ -25,7 +25,7 @@ cd server && npm test       # testy serwera (node:test)
 cd agent && go test ./...   # testy agenta
 ```
 
-## Funkcje (v0.4.0)
+## Funkcje (v0.5.0)
 
 **Komputery**
 - rejestracja tokenem (jednorazowym lub wielokrotnym, z terminem ważności, opcjonalnie od razu przypisującym klienta i lokalizację); każdy agent dostaje własny sekret
@@ -41,6 +41,7 @@ cd agent && go test ./...   # testy agenta
 - procesy: lista z CPU i pamięcią, sortowanie, wyszukiwanie, odświeżanie na żywo, zakończenie procesu
 - usługi: start, stop, restart, autostart (Windows, systemd, launchd)
 - zasilanie: restart / wyłączenie z opóźnieniem i komunikatem dla użytkownika, anulowanie, wylogowanie, blokada ekranu — panel pokazuje tylko akcje obsługiwane przez dany system
+- **pliki**: przeglądanie dysków i skrótów, wysyłanie (przeciągnij i upuść, postęp, kolejka, pytanie o nadpisanie), pobieranie plików i folderów (ZIP w locie), nowy folder, zmiana nazwy, usuwanie, podgląd i edycja plików tekstowych z wykrywaniem konfliktu; kontrola przepływu — wolne łącze nie zapycha pamięci serwera; katalogi systemowe chronione
 - Wake-on-LAN przez inny włączony komputer z tej samej sieci (ta sama podsieć + to samo łącze lub klient)
 
 **Zespół i bezpieczeństwo**
@@ -93,7 +94,9 @@ vnc.twojadomena.pl {
 }
 ```
 
-Zmienne środowiskowe serwera: `PORT`, `HOST`, `DATA_DIR`, `PANEL_DIR`, `COOKIE_SECURE=1`, `TRUST_PROXY=1`, `ADMIN_USER`/`ADMIN_PASSWORD` (tylko przy pierwszym starcie), `LOG_LEVEL`, `REQUIRE_2FA=0` (wyłącza obowiązkowe 2FA — **tylko do developmentu**).
+Zmienne środowiskowe serwera: `PORT`, `HOST`, `DATA_DIR`, `PANEL_DIR`, `COOKIE_SECURE=1`, `TRUST_PROXY=1`, `ADMIN_USER`/`ADMIN_PASSWORD` (tylko przy pierwszym starcie), `LOG_LEVEL`, `REQUIRE_2FA=0` (wyłącza obowiązkowe 2FA — **tylko do developmentu**), `MAX_UPLOAD_MB` (limit wysyłanego pliku, domyślnie 10240).
+
+W Caddy/nginx przed serwerem nie ustawiaj limitu treści żądania mniejszego niż `MAX_UPLOAD_MB` i nie buforuj żądań — wysyłanie jest strumieniowe.
 
 Narzędzia awaryjne (na serwerze, w katalogu `server/`):
 
@@ -113,8 +116,8 @@ npm run cli -- unlock <login>     # odblokowanie konta
 | 0 | Fundament: git, testy, CI, migracje, moduły serwera, protokół poleceń | ✅ v0.2.0 |
 | 1 | Organizacja: klienci, lokalizacje i tagi; zespół z rolami; 2FA | ✅ v0.3.0 |
 | 2 | Praca zdalna: terminal interaktywny, procesy i usługi, zasilanie i Wake-on-LAN | ✅ v0.4.0 |
-| 3 | Menedżer plików | ⏳ |
-| 4 | Monitoring: historia i wykresy, stan bezpieczeństwa, historia zmian, alerty i powiadomienia | |
+| 3 | Menedżer plików | ✅ v0.5.0 |
+| 4 | Monitoring: historia i wykresy, stan bezpieczeństwa, historia zmian, alerty i powiadomienia | ⏳ |
 | 5 | Automatyzacja: biblioteka skryptów, zadania zaplanowane, wdrażanie programów i aktualizacji | |
 | 6 | Pulpit zdalny + aplikacja w zasobniku (zgoda, czat) | |
 | 7 | Dystrybucja: instalatory z tokenem, auto-aktualizacja, podpisywanie kodu | |

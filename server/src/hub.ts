@@ -35,7 +35,9 @@ interface AgentConn {
 /** Odbiorca strumienia (np. terminal w przeglądarce). */
 export interface ChannelSink {
   onData(payload: Buffer): void;
-  onClose(info: { reason: 'exited' | 'agent_disconnected' | 'server_closing'; exitCode?: number }): void;
+  /** agent potwierdził zapis `bytes` bajtów (wysyłanie do agenta z kontrolą przepływu) */
+  onAck?(bytes: number): void;
+  onClose(info: { reason: 'exited' | 'agent_disconnected' | 'server_closing'; exitCode?: number; error?: string }): void;
 }
 
 interface ChannelEntry {
@@ -45,6 +47,7 @@ interface ChannelEntry {
 }
 
 const FRAME_DATA = 1;
+const FRAME_ACK = 2;
 
 /** Ramka binarna: [rodzaj u8][kanał u32 BE][dane] — ten sam format co w agent/channels.go. */
 export function encodeFrame(kind: number, channel: number, payload: Buffer): Buffer {
@@ -225,12 +228,16 @@ export class Hub {
         break;
       }
       case 'channel.closed': {
-        const d = (msg.data ?? {}) as { channel?: number; exitCode?: number };
+        const d = (msg.data ?? {}) as { channel?: number; exitCode?: number; error?: string };
         const key = `${agentId}:${d.channel}`;
         const entry = this.channels.get(key);
         if (entry) {
           this.channels.delete(key);
-          entry.sink.onClose({ reason: 'exited', exitCode: typeof d.exitCode === 'number' ? d.exitCode : undefined });
+          entry.sink.onClose({
+            reason: 'exited',
+            exitCode: typeof d.exitCode === 'number' ? d.exitCode : undefined,
+            error: typeof d.error === 'string' ? d.error.slice(0, 500) : undefined,
+          });
         }
         break;
       }
@@ -314,6 +321,15 @@ export class Hub {
     return true;
   }
 
+  /** Potwierdzenie dla agenta, że odbiorca (przeglądarka) przyjął `bytes` bajtów — agent może nadawać dalej. */
+  sendAck(agentId: string, channel: number, bytes: number): void {
+    const conn = this.agents.get(agentId);
+    if (!conn || !this.channels.has(`${agentId}:${channel}`)) return;
+    const n = Buffer.alloc(4);
+    n.writeUInt32BE(bytes);
+    conn.socket.send(encodeFrame(FRAME_ACK, channel, n), { binary: true });
+  }
+
   /** Zamknięcie z inicjatywy serwera/panelu — agent kończy proces po swojej stronie. */
   closeChannel(agentId: string, channel: number): void {
     if (!this.channels.delete(`${agentId}:${channel}`)) return;
@@ -321,9 +337,12 @@ export class Hub {
   }
 
   private handleAgentFrame(agentId: string, raw: Buffer): void {
-    if (raw.length < 5 || raw[0] !== FRAME_DATA) return;
+    if (raw.length < 5) return;
     // klucz zawiera agentId — agent nie może pisać do cudzego kanału
-    this.channels.get(`${agentId}:${raw.readUInt32BE(1)}`)?.sink.onData(raw.subarray(5));
+    const entry = this.channels.get(`${agentId}:${raw.readUInt32BE(1)}`);
+    if (!entry) return;
+    if (raw[0] === FRAME_DATA) entry.sink.onData(raw.subarray(5));
+    else if (raw[0] === FRAME_ACK && raw.length === 9) entry.sink.onAck?.(raw.readUInt32BE(5));
   }
 
   private closeChannelsOf(agentId: string | null, reason: 'agent_disconnected' | 'server_closing'): void {
