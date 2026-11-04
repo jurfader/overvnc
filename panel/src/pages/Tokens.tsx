@@ -6,6 +6,17 @@ import { useMe } from '../state.tsx';
 import { PlacementFields } from './organize.tsx';
 import { dateTime } from '../format.ts';
 
+/** Ważność tokenu — w godzinach, jak oczekuje serwer (maks. rok). */
+const TTL_OPTIONS = [
+  { hours: 1, label: '1 godzinę' },
+  { hours: 8, label: '8 godzin' },
+  { hours: 24, label: '1 dzień' },
+  { hours: 24 * 7, label: '7 dni' },
+  { hours: 24 * 30, label: '30 dni' },
+  { hours: 24 * 90, label: '90 dni' },
+  { hours: 24 * 365, label: '1 rok' },
+];
+
 export function Tokens() {
   const [tokens, setTokens] = useState<EnrollToken[]>([]);
   const [label, setLabel] = useState('');
@@ -66,8 +77,14 @@ export function Tokens() {
             <input className="pole" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="np. Biuro Kraków — recepcja" />
           </label>
           <label className="field">
-            Ważny (godziny)
-            <input className="pole" type="number" min={1} max={8760} value={ttl} onChange={(e) => setTtl(Number(e.target.value))} />
+            Ważny przez
+            <select className="pole" value={ttl} onChange={(e) => setTtl(Number(e.target.value))}>
+              {TTL_OPTIONS.map((o) => (
+                <option key={o.hours} value={o.hours}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="field">
             Liczba użyć
