@@ -10,7 +10,26 @@ SERVER="${1:?adres serwera}"; TOKEN="${2:?token rejestracji}"; VERSION="${3:?wer
 OUT="$ROOT/dist/overvnc-kiosk"
 rm -rf "$OUT" && mkdir -p "$OUT"
 
-(cd "$ROOT/agent" && CGO_ENABLED=0 GOOS=windows GOARCH="$ARCH" go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$OUT/overvnc-agent.exe" .)
+BIN="overvnc-agent-windows-$ARCH.exe"
+if gh release view "v$VERSION" --repo jurfader/overvnc >/dev/null 2>&1; then
+  # agent z opublikowanego wydania — bajt w bajt ten podpisany; weryfikujemy podpis i sumę przed użyciem
+  REL=$(mktemp -d)
+  gh release download "v$VERSION" --repo jurfader/overvnc -D "$REL" -p "$BIN" -p manifest.json -p manifest.json.sig
+  node -e '
+    const { createPublicKey, verify, createHash } = require("node:crypto"); const fs = require("node:fs");
+    const [dir, bin, src] = process.argv.slice(1);
+    const pub = fs.readFileSync(src, "utf8").match(/updatePublicKeyB64 = "([^"]+)"/)[1];
+    const key = createPublicKey({ key: Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), Buffer.from(pub, "base64")]), format: "der", type: "spki" });
+    const raw = fs.readFileSync(dir + "/manifest.json");
+    if (!verify(null, raw, key, fs.readFileSync(dir + "/manifest.json.sig"))) throw new Error("zły podpis wydania");
+    const f = Object.values(JSON.parse(raw).files).find((x) => x.name === bin);
+    if (!f || createHash("sha256").update(fs.readFileSync(dir + "/" + bin)).digest("hex") !== f.sha256) throw new Error("zła suma kontrolna");
+    console.log("✔ agent z wydania v" + JSON.parse(raw).version + " (podpis i suma zgodne)");' "$REL" "$BIN" "$ROOT/agent/update.go"
+  cp "$REL/$BIN" "$OUT/overvnc-agent.exe" && rm -rf "$REL"
+else
+  echo "⚠ brak wydania v$VERSION na GitHubie — buduję agenta lokalnie (do testów)"
+  (cd "$ROOT/agent" && CGO_ENABLED=0 GOOS=windows GOARCH="$ARCH" go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$OUT/overvnc-agent.exe" .)
+fi
 
 crlf() { sed 's/$/\r/' > "$1"; }
 
