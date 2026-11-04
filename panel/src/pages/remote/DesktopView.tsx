@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ClipboardPaste, Eye, Keyboard, Lock, Maximize2, Minimize2, MonitorSmartphone, MousePointer2, Plug, RotateCcw, ShieldAlert, ZoomOut } from 'lucide-react';
+import { ClipboardPaste, Expand, Eye, Keyboard, Lock, Maximize2, Minimize2, MonitorSmartphone, MousePointer2, Plug, RotateCcw, ShieldAlert, Shrink, ZoomOut } from 'lucide-react';
 import type { Agent } from '../../api.ts';
 import { Badge, Button, EmptyState, toast } from '../../components.tsx';
 import { bytes } from '../../format.ts';
@@ -498,6 +498,24 @@ export function DesktopView({ agent }: { agent: Agent }) {
   }, []);
   // iPhone nie obsługuje trybu pełnoekranowego dla elementów strony — wtedy pełny ekran w obrębie strony
   const [cssFull, setCssFull] = useState(false);
+  // „Wypełnij okno”: pulpit na całą kartę przeglądarki bez trybu pełnoekranowego (zapamiętane na tym urządzeniu)
+  const [fillWindow, setFillWindow] = useState(() => {
+    try {
+      return localStorage.getItem('overvnc.desktop.fill') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleFillWindow = () => {
+    const next = !fillWindow;
+    setFillWindow(next);
+    try {
+      localStorage.setItem('overvnc.desktop.fill', next ? '1' : '0');
+    } catch {
+      /* tryb prywatny */
+    }
+    requestAnimationFrame(() => canvas.current?.focus());
+  };
   const toggleFullscreen = () => {
     if (cssFull) return setCssFull(false);
     if (document.fullscreenElement) void document.exitFullscreen();
@@ -517,7 +535,7 @@ export function DesktopView({ agent }: { agent: Agent }) {
 
   const secure = info?.desktop && info.desktop.toLowerCase() !== 'default';
   return (
-    <div ref={wrap} className={`desktop-wrap glass-card anim-rise ${fullscreen || cssFull ? 'fullscreen' : ''} ${cssFull ? 'fullscreen-css' : ''}`}>
+    <div ref={wrap} className={`desktop-wrap glass-card anim-rise ${fullscreen || cssFull ? 'fullscreen' : ''} ${cssFull ? 'fullscreen-css' : ''} ${fillWindow && !fullscreen && !cssFull ? 'fill-window' : ''}`}>
       <div className="term-bar">
         <div className="term-status">
           <span
@@ -575,6 +593,16 @@ export function DesktopView({ agent }: { agent: Agent }) {
           {state === 'ready' && !viewOnly && <Button size="sm" variant="ghost" icon={ClipboardPaste} title="Wklej tekst ze schowka (albo Ctrl+V na obrazie)" onClick={() => void pasteFromClipboard()} />}
           {zoom.s > 1 && <Button size="sm" variant="ghost" icon={ZoomOut} title="Pomniejsz (cały ekran)" onClick={() => setZoom(NO_ZOOM)} />}
           <Button size="sm" variant="ghost" icon={RotateCcw} title="Połącz ponownie" onClick={() => setSession((n) => n + 1)} />
+          {!fullscreen && !cssFull && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="only-desktop"
+              icon={fillWindow ? Shrink : Expand}
+              title={fillWindow ? 'Przywróć widok z menu' : 'Wypełnij okno przeglądarki (bez pełnego ekranu)'}
+              onClick={toggleFillWindow}
+            />
+          )}
           <Button size="sm" variant="ghost" icon={fullscreen || cssFull ? Minimize2 : Maximize2} title={fullscreen || cssFull ? 'Zamknij pełny ekran' : 'Pełny ekran'} onClick={toggleFullscreen} />
         </div>
       </div>

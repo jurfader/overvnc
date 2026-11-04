@@ -789,9 +789,12 @@ textarea.pole.editor-area { font: 12.5px/1.55 var(--font-mono); height: 58vh; mi
 }
 /* pulpit zdalny na ekranach dotykowych */
 .desktop-stage { touch-action: none; }
-.desktop-zoom { position: absolute; inset: 0; display: grid; place-items: center; transform-origin: 0 0; will-change: transform; }
+.desktop-zoom { position: absolute; inset: 0; display: grid; place-items: center; transform-origin: 0 0; will-change: transform;
+  /* jawne wymiary komórki: bez nich max-height: 100% obrazu nie działa i szeroki ekran był ucinany u dołu */
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr); }
 .desktop-keyinput { position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; font-size: 16px; /* 16px: iOS nie powiększa strony przy fokusie */ }
-.desktop-wrap.fullscreen-css { position: fixed; inset: 0; z-index: 150; height: 100dvh; border-radius: 0; border: 0; }
+.desktop-wrap.fill-window { position: fixed; inset: 8px; z-index: 150; height: auto; min-height: 0; box-shadow: var(--shadow-okno); background: var(--okno-solid); }
+.desktop-wrap.fullscreen-css { background: var(--okno-solid); position: fixed; inset: 0; z-index: 150; height: 100dvh; border-radius: 0; border: 0; }
 .term-key.wide { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-sans); }
 .term-key.on { background: var(--gradient-brand); color: #fff; border-color: transparent; }
 .touch-only { display: none; }
@@ -801,6 +804,8 @@ textarea.pole.editor-area { font: 12.5px/1.55 var(--font-mono); height: 58vh; mi
 }
 @media (max-width: 720px) {
   .desktop-wrap { height: calc(100dvh - 66px); min-height: 360px; scroll-margin-top: 60px; }
+  /* na telefonie przycisk „Wypełnij okno” jest ukryty — zapamiętany tryb z komputera nie może tu zablokować widoku */
+  .desktop-wrap.fill-window { position: relative; inset: auto; z-index: auto; height: calc(100dvh - 66px); min-height: 360px; box-shadow: none; }
   .desktop-wrap .term-foot { font-size: 11.5px; }
   .desktop-wrap .term-bar .toolbar { width: 100%; }
 }
