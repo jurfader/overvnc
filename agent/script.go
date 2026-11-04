@@ -83,21 +83,29 @@ func handleScriptRun(ctx context.Context, data json.RawMessage) (any, error) {
 		return nil, protoErr("unsupported", "uruchamianie jako zalogowany użytkownik nie jest obsługiwane na tym systemie")
 	}
 
+	return startRun(ctx, req.RunID, limit, func(rctx context.Context) (scriptResult, error) {
+		return executeScript(rctx, sh, req)
+	})
+}
+
+// startRun uruchamia pracę (skrypt, wdrożenie) niezależnie od połączenia z serwerem i czeka na wynik.
+// Ten sam runId nie uruchamia jej drugi raz — tylko czeka na wynik (np. po ponownym połączeniu).
+func startRun(ctx context.Context, runID string, limit time.Duration, fn func(context.Context) (scriptResult, error)) (any, error) {
 	runsMu.Lock()
 	pruneRuns()
-	r, exists := runs[req.RunID]
+	r, exists := runs[runID]
 	if !exists {
 		r = &scriptRun{done: make(chan struct{})}
-		runs[req.RunID] = r
+		runs[runID] = r
 	}
 	runsMu.Unlock()
 
 	if !exists {
-		// kontekst niezależny od połączenia — skrypt kończy się tylko sam albo po przekroczeniu limitu
+		// kontekst niezależny od połączenia — praca kończy się sama albo po przekroczeniu limitu
 		go func() {
 			rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limit)
 			defer cancel()
-			res, err := executeScript(rctx, sh, req)
+			res, err := fn(rctx)
 			runsMu.Lock()
 			r.result, r.err, r.ended = res, err, time.Now()
 			runsMu.Unlock()
@@ -145,8 +153,11 @@ func pruneRuns() {
 }
 
 func executeScript(ctx context.Context, sh shellSpec, req scriptReq) (scriptResult, error) {
+	return executeScriptOut(ctx, sh, req, &cappedOutput{head: scriptOutputHead, tail: scriptOutputTail})
+}
+
+func executeScriptOut(ctx context.Context, sh shellSpec, req scriptReq, out *cappedOutput) (scriptResult, error) {
 	var res scriptResult
-	out := &cappedOutput{head: scriptOutputHead, tail: scriptOutputTail}
 	start := time.Now()
 	var code int
 	var err error
@@ -163,6 +174,19 @@ func executeScript(ctx context.Context, sh shellSpec, req scriptReq) (scriptResu
 	res.TimedOut = errors.Is(ctx.Err(), context.DeadlineExceeded)
 	res.Output, res.Truncated = out.String()
 	return res, nil
+}
+
+// withEnvVar dopisuje na początku skryptu zmienną środowiskową w składni danej powłoki
+// (działa tak samo jako usługa i jako użytkownik, bez modyfikowania bloku środowiska procesu).
+func withEnvVar(sh shellSpec, name, value, script string) string {
+	switch sh.name {
+	case "powershell", "pwsh":
+		return "$env:" + name + " = '" + strings.ReplaceAll(value, "'", "''") + "'\n" + script
+	case "cmd":
+		return `set "` + name + "=" + value + `"` + "\n" + script
+	default:
+		return name + "='" + strings.ReplaceAll(value, "'", `'\''`) + "'; export " + name + "\n" + script
+	}
 }
 
 // scriptFile — treść pliku skryptu i polecenie uruchamiające go w danej powłoce.

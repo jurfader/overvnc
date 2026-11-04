@@ -9,7 +9,7 @@ import type { Hub } from './hub.ts';
  * Skrypt działa na agencie niezależnie od połączenia; po zerwaniu serwer odbiera wynik poleceniem script.result.
  */
 
-export const JOB_KINDS = ['script', 'message', 'power', 'inventory'] as const;
+export const JOB_KINDS = ['script', 'message', 'power', 'inventory', 'deploy'] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
 export type TargetStatus = 'queued' | 'running' | 'ok' | 'failed' | 'expired' | 'canceled' | 'lost';
@@ -30,7 +30,22 @@ export interface PowerParams {
   delayMinutes: number;
   message: string;
 }
-export type JobParams = ScriptParams | MessageParams | PowerParams | Record<string, never>;
+/** Wdrożenie pliku: dane pliku zamrożone przy tworzeniu zadania (agent sprawdza rozmiar i SHA-256). */
+export interface DeployParams {
+  packageId: number;
+  name: string;
+  size: number;
+  sha256: string;
+  dir: string;
+  overwrite: boolean;
+  shell: string;
+  script: string;
+  asUser: boolean;
+  timeoutSec: number;
+}
+/** limit na pobranie pliku (poza limitem skryptu instalacji) */
+export const DEPLOY_DOWNLOAD_MS = 2 * 3600_000;
+export type JobParams = ScriptParams | MessageParams | PowerParams | DeployParams | Record<string, never>;
 
 interface TargetRow {
   job_id: number;
@@ -135,7 +150,7 @@ export class JobRunner {
     // przerwane rozłączeniem (albo restartem serwera) — skrypt mógł się dalej wykonywać na komputerze
     for (const t of this.targets(`t.agent_id = ? AND t.status = 'running'`, agentId)) {
       if (this.inflight.has(key(t))) continue;
-      if (t.kind === 'script') this.resumeScript(t);
+      if (t.kind === 'script' || t.kind === 'deploy') this.resumeScript(t);
       else this.finish(t, 'lost', { error: 'Połączenie przerwane w trakcie — wynik nieznany.' });
     }
   }
@@ -167,6 +182,16 @@ export class JobRunner {
       case 'inventory':
         req = this.hub.request(t.agent_id, 'inventory.refresh', undefined, { capability: 'inventory.refresh', timeoutMs: 120_000 });
         break;
+      case 'deploy': {
+        const d = p as DeployParams;
+        req = this.hub.request(
+          t.agent_id,
+          'deploy.run',
+          { runId: t.run_id, url: `/api/agent/packages/${d.packageId}`, ...d },
+          { capability: 'deploy.run', timeoutMs: DEPLOY_DOWNLOAD_MS + d.timeoutSec * 1000 + 60_000 },
+        );
+        break;
+      }
       default:
         req = Promise.reject(new HttpError(400, 'bad_kind', 'Nieznany rodzaj zadania.'));
     }
@@ -178,8 +203,7 @@ export class JobRunner {
 
   private resumeScript(t: TargetRow): void {
     this.inflight.add(key(t));
-    const s = JSON.parse(t.params_json) as ScriptParams;
-    const left = (t.started_at ?? Date.now()) + s.timeoutSec * 1000 + 60_000 - Date.now();
+    const left = (t.started_at ?? Date.now()) + runLimitMs(t) + 60_000 - Date.now();
     this.hub
       .request(t.agent_id, 'script.result', { runId: t.run_id }, { capability: 'script.run', timeoutMs: Math.max(60_000, left) })
       .then(
@@ -193,7 +217,7 @@ export class JobRunner {
   }
 
   private onResult(t: TargetRow, res: unknown): void {
-    if (t.kind === 'script') {
+    if (t.kind === 'script' || t.kind === 'deploy') {
       const r = (res ?? {}) as ScriptResult;
       const ok = r.exitCode === 0 && !r.timedOut;
       let output = typeof r.output === 'string' ? r.output : '';
@@ -218,8 +242,8 @@ export class JobRunner {
       return;
     }
     if (code === 'agent_disconnected' || code === 'server_closing') {
-      // skrypt trwa dalej na komputerze — wynik odbierzemy po ponownym połączeniu
-      if (t.kind === 'script') return;
+      // skrypt/wdrożenie trwa dalej na komputerze — wynik odbierzemy po ponownym połączeniu
+      if (t.kind === 'script' || t.kind === 'deploy') return;
       // restart/wyłączenie: rozłączenie to spodziewany skutek polecenia
       if (t.kind === 'power') return this.finish(t, 'ok', {});
       return this.finish(t, 'lost', { error: 'Połączenie przerwane w trakcie — wynik nieznany.' });
@@ -262,7 +286,7 @@ export class JobRunner {
       const now = Date.now();
       for (const t of this.targets(`t.status = 'running'`)) {
         if (this.inflight.has(key(t))) continue;
-        const limit = t.kind === 'script' ? (JSON.parse(t.params_json) as ScriptParams).timeoutSec * 1000 : 0;
+        const limit = runLimitMs(t);
         if ((t.started_at ?? 0) + limit + LOST_GRACE_MS < now) this.finish(t, 'lost', { error: 'Brak wyniku — komputer nie wrócił online.' });
       }
     } catch (err) {
@@ -281,6 +305,13 @@ export class JobRunner {
     }, 300);
     this.flushTimer.unref?.();
   }
+}
+
+/** Najdłuższy możliwy czas wykonania na komputerze (skrypt: jego limit; wdrożenie: pobranie + instalacja). */
+function runLimitMs(t: Pick<TargetRow, 'kind' | 'params_json'>): number {
+  if (t.kind === 'script') return (JSON.parse(t.params_json) as ScriptParams).timeoutSec * 1000;
+  if (t.kind === 'deploy') return DEPLOY_DOWNLOAD_MS + (JSON.parse(t.params_json) as DeployParams).timeoutSec * 1000;
+  return 0;
 }
 
 function key(t: Pick<TargetRow, 'job_id' | 'agent_id'>): string {

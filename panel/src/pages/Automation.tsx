@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
-import { BookMarked, CalendarClock, Pencil, Play, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { BookMarked, CalendarClock, FileDown, Pencil, Play, Trash2, Upload } from 'lucide-react';
 import {
   api,
   errorMessage,
   type Agent,
   type JobKind,
   type LibraryScript,
+  type Package,
   type Schedule,
   type ScheduleInput,
   type ScheduleTarget,
@@ -13,7 +14,7 @@ import {
   type ScriptShell,
 } from '../api.ts';
 import { Badge, Button, ClientLabel, EmptyState, Field, Modal, TagChip, toast } from '../components.tsx';
-import { ago, plural } from '../format.ts';
+import { ago, bytes, plural } from '../format.ts';
 import { useMe, useOrg } from '../state.tsx';
 import { KIND_META, MESSAGE_TIMES, NewJobModal, SHELLS, TargetPicker, TIMEOUTS, timeoutLabel, useHeaderAction, WAITS } from './Jobs.tsx';
 
@@ -451,6 +452,9 @@ export function SchedulesTab({ agents, action }: { agents: Agent[]; action: numb
 }
 
 type TargetType = ScheduleTarget['type'];
+/** harmonogram: bez wdrożeń plików (te uruchamia się ręcznie) */
+type ScheduleKind = Exclude<JobKind, 'deploy'>;
+const SCHEDULE_KINDS: ScheduleKind[] = ['script', 'message', 'power', 'inventory'];
 
 function ScheduleModal({ schedule, agents, onClose, onSaved }: { schedule: Schedule | 'new' | null; agents: Agent[]; onClose: () => void; onSaved: () => void }) {
   const { tags } = useOrg();
@@ -458,7 +462,7 @@ function ScheduleModal({ schedule, agents, onClose, onSaved }: { schedule: Sched
   const existing = schedule && schedule !== 'new' ? schedule : null;
   const [name, setName] = useState('');
   const [clientId, setClientId] = useState<number | null>(null);
-  const [kind, setKind] = useState<JobKind>('script');
+  const [kind, setKind] = useState<ScheduleKind>('script');
   const [scriptId, setScriptId] = useState<number | null>(null);
   const [msgText, setMsgText] = useState('');
   const [msgTitle, setMsgTitle] = useState('');
@@ -483,7 +487,7 @@ function ScheduleModal({ schedule, agents, onClose, onSaved }: { schedule: Sched
     const s = existing;
     setName(s?.name ?? '');
     setClientId(s ? s.clientId : defClient);
-    setKind(s?.kind ?? 'script');
+    setKind((s?.kind as ScheduleKind | undefined) ?? 'script');
     setScriptId(s?.kind === 'script' ? s.params.scriptId : null);
     setMsgText(s?.kind === 'message' ? s.params.text : '');
     setMsgTitle(s?.kind === 'message' ? (s.params.title ?? '') : '');
@@ -565,7 +569,7 @@ function ScheduleModal({ schedule, agents, onClose, onSaved }: { schedule: Sched
 
         <Field label="Co zrobić" group>
           <div className="seg seg-wrap" role="tablist" aria-label="Rodzaj zadania">
-            {(Object.keys(KIND_META) as JobKind[]).map((k) => {
+            {SCHEDULE_KINDS.map((k) => {
               const M = KIND_META[k];
               return (
                 <button type="button" key={k} role="tab" aria-selected={kind === k} className={`seg-btn ${kind === k ? 'on' : ''}`} onClick={() => setKind(k)}>
@@ -723,6 +727,189 @@ function ScheduleModal({ schedule, agents, onClose, onSaved }: { schedule: Sched
           </Button>
           <Button variant="primary" icon={CalendarClock} loading={busy}>
             Zapisz
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+// ---------- pliki do wdrażania ----------
+
+export function PackagesTab({ agents, action }: { agents: Agent[]; action: number }) {
+  const { clients } = useOrg();
+  const [list, setList] = useState<Package[] | null>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [deploy, setDeploy] = useState<Package | null>(null);
+  const [del, setDel] = useState<Package | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => {
+    api.packages().then(setList, (e) => toast(errorMessage(e), 'err'));
+  }, []);
+  useEffect(load, [load]);
+  useHeaderAction(action, () => setUploadOpen(true));
+
+  const remove = async () => {
+    if (!del) return;
+    setBusy(true);
+    try {
+      await api.deletePackage(del.id);
+      toast('Usunięto plik');
+      setDel(null);
+      load();
+    } catch (e) {
+      toast(errorMessage(e), 'err');
+      setDel(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      {list && list.length === 0 ? (
+        <EmptyState icon={FileDown} title="Brak plików" text="Wyślij instalator (MSI, EXE), archiwum ZIP albo plik konfiguracyjny — potem wdrożysz go na wiele komputerów naraz, także na te, które włączą się później.">
+          <Button variant="primary" icon={Upload} onClick={() => setUploadOpen(true)}>
+            Wyślij plik
+          </Button>
+        </EmptyState>
+      ) : (
+        <div className="glass-card table-card anim-rise">
+          <div className="table-scroll">
+            <table className="table stack">
+              <thead>
+                <tr>
+                  <th>Plik</th>
+                  <th>Klient</th>
+                  <th>Wysłany</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {(list ?? []).map((p) => {
+                  const c = clients.find((x) => x.id === p.clientId);
+                  return (
+                    <tr key={p.id} className={p.ready ? '' : 'paused'}>
+                      <td className="s-main">
+                        <div className="strong ellipsis">{p.name}</div>
+                        <div className="small muted">
+                          {bytes(p.size)}
+                          {!p.ready && ` · wysyłanie przerwane (${Math.round((p.received / p.size) * 100)}%)`}
+                          {p.sha256 && <span className="mono"> · SHA-256 {p.sha256.slice(0, 12)}…</span>}
+                        </div>
+                      </td>
+                      <td className="s-full">{c ? <ClientLabel name={c.name} color={c.color} /> : <span className="small muted">wspólny</span>}</td>
+                      <td className="s-meta small ink-2 nowrap" data-label="Wysłany">
+                        {ago(p.createdAt)} · {p.createdBy}
+                      </td>
+                      <td className="s-full">
+                        <div className="cell-actions">
+                          {p.ready && (
+                            <Button size="sm" variant="primary" icon={FileDown} onClick={() => setDeploy(p)}>
+                              Wdróż
+                            </Button>
+                          )}
+                          <Button size="sm" variant="ghost" icon={Trash2} title="Usuń" onClick={() => setDel(p)} />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!list && (
+                  <tr>
+                    <td colSpan={4} className="center-text">
+                      Wczytywanie…
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      <UploadModal
+        open={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+        onDone={() => {
+          setUploadOpen(false);
+          load();
+        }}
+      />
+      <NewJobModal
+        open={!!deploy}
+        onClose={() => setDeploy(null)}
+        agents={deploy?.clientId ? agents.filter((a) => a.clientId === deploy.clientId) : agents}
+        preselected={[]}
+        initialKind="deploy"
+        initialPackage={deploy ?? undefined}
+      />
+      <Confirm text={del ? `Plik „${del.name}” zostanie usunięty z serwera. Komputery, na które już trafił, zachowają go.` : null} onYes={remove} onClose={() => setDel(null)} busy={busy} />
+    </>
+  );
+}
+
+function UploadModal({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
+  const defClient = useDefaultClient();
+  const [clientId, setClientId] = useState<number | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [sent, setSent] = useState<number | null>(null);
+  const [error, setError] = useState('');
+  const abort = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setClientId(defClient);
+      setFile(null);
+      setSent(null);
+      setError('');
+    } else abort.current?.abort();
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!file) return setError('Wybierz plik.');
+    const ac = new AbortController();
+    abort.current = ac;
+    setError('');
+    setSent(0);
+    try {
+      await api.uploadPackage(file, clientId, setSent, ac.signal);
+      toast('Wysłano plik');
+      onDone();
+    } catch (err) {
+      if (!ac.signal.aborted) setError(errorMessage(err));
+      setSent(null);
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose}>
+      <form onSubmit={submit}>
+        <h3>Wyślij plik</h3>
+        <Field label="Plik" hint="Do 4 GB. Duże pliki idą kawałkami — chwilowa przerwa w połączeniu nie przerywa wysyłania.">
+          <input className="pole" type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} disabled={sent !== null} />
+        </Field>
+        <Field label="Klient" hint="Plik klienta widzą i wdrażają tylko konta tego klienta.">
+          <ClientSelect value={clientId} onChange={setClientId} sharedLabel="Wspólny (wszyscy klienci)" />
+        </Field>
+        {sent !== null && file && (
+          <div className="upload-row">
+            <div className="small">
+              {bytes(sent)} z {bytes(file.size)}
+            </div>
+            <div className="jp-track">
+              <span className="jp-seg run" style={{ width: `${(sent / Math.max(1, file.size)) * 100}%` }} />
+            </div>
+          </div>
+        )}
+        {error && <div className="form-error">{error}</div>}
+        <div className="okno-actions">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            {sent !== null ? 'Przerwij' : 'Anuluj'}
+          </Button>
+          <Button variant="primary" icon={Upload} loading={sent !== null} disabled={!file}>
+            Wyślij
           </Button>
         </div>
       </form>

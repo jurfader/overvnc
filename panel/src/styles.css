@@ -935,3 +935,7 @@ textarea.pole.editor-area { font: 12.5px/1.55 var(--font-mono); height: 58vh; mi
   .cell-actions { justify-content: flex-start; }
   .when-row input[type='time'] { width: 100%; }
 }
+.upload-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; }
+.upload-row .jp-track { grid-column: 1; }
+.upload-row .btn { grid-column: 2; grid-row: 1 / span 2; }
+.inline-form select.pole { flex: 1; min-width: 180px; }

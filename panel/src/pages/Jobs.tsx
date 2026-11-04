@@ -8,7 +8,9 @@ import {
   CircleDashed,
   Clock,
   Copy,
+  FileDown,
   FileTerminal,
+  Upload,
   ListChecks,
   Loader2,
   MessageSquareText,
@@ -23,10 +25,10 @@ import {
   XCircle,
   type LucideIcon,
 } from 'lucide-react';
-import { api, errorMessage, type Agent, type Job, type LibraryScript, type JobDetail, type JobInput, type JobKind, type JobTarget, type JobTargetStatus, type ScriptShell } from '../api.ts';
+import { api, errorMessage, type Agent, type Job, type LibraryScript, type Package, type JobDetail, type JobInput, type JobKind, type JobTarget, type JobTargetStatus, type ScriptShell } from '../api.ts';
 import { Badge, Button, Checkbox, ClientLabel, EmptyState, Field, Modal, toast } from '../components.tsx';
-import { ScriptsTab, SchedulesTab } from './Automation.tsx';
-import { ago, dateTime, plural } from '../format.ts';
+import { PackagesTab, ScriptsTab, SchedulesTab } from './Automation.tsx';
+import { ago, bytes, dateTime, plural } from '../format.ts';
 import { useOrg } from '../state.tsx';
 
 // ---------- wspólne ----------
@@ -36,6 +38,7 @@ export const KIND_META: Record<JobKind, { label: string; icon: LucideIcon }> = {
   message: { label: 'Komunikat', icon: MessageSquareText },
   power: { label: 'Zasilanie', icon: Power },
   inventory: { label: 'Inwentarz', icon: RefreshCw },
+  deploy: { label: 'Plik', icon: FileDown },
 };
 
 const STATUS_META: Record<JobTargetStatus, { label: string; variant: 'success' | 'danger' | 'warning' | 'info' | 'neutral'; icon: LucideIcon }> = {
@@ -134,12 +137,13 @@ function PageHead({ title, sub, children, back }: { title: ReactNode; sub?: Reac
 
 // ---------- lista ----------
 
-export type JobsTab = 'history' | 'schedules' | 'scripts';
+export type JobsTab = 'history' | 'schedules' | 'scripts' | 'files';
 
 const JOB_TABS: { key: JobsTab; label: string; icon: LucideIcon; href: string }[] = [
   { key: 'history', label: 'Historia', icon: ListChecks, href: '#/jobs' },
   { key: 'schedules', label: 'Harmonogram', icon: CalendarClock, href: '#/jobs/schedules' },
   { key: 'scripts', label: 'Skrypty', icon: BookMarked, href: '#/jobs/scripts' },
+  { key: 'files', label: 'Pliki', icon: FileDown, href: '#/jobs/files' },
 ];
 
 export function Jobs({ agents, tab }: { agents: Agent[]; tab: JobsTab }) {
@@ -150,8 +154,8 @@ export function Jobs({ agents, tab }: { agents: Agent[]; tab: JobsTab }) {
         title="Zadania"
         sub="Skrypty, komunikaty i restarty na wielu komputerach — wykonują się w tle, także po zamknięciu przeglądarki"
       >
-        <Button variant="primary" icon={tab === 'history' ? Play : Plus} onClick={() => setAction((n) => n + 1)}>
-          {tab === 'history' ? 'Nowe zadanie' : tab === 'schedules' ? 'Nowy harmonogram' : 'Nowy skrypt'}
+        <Button variant="primary" icon={tab === 'history' ? Play : tab === 'files' ? Upload : Plus} onClick={() => setAction((n) => n + 1)}>
+          {tab === 'history' ? 'Nowe zadanie' : tab === 'schedules' ? 'Nowy harmonogram' : tab === 'files' ? 'Wyślij plik' : 'Nowy skrypt'}
         </Button>
       </PageHead>
       <nav className="detail-tabs anim-rise" aria-label="Zadania">
@@ -164,6 +168,7 @@ export function Jobs({ agents, tab }: { agents: Agent[]; tab: JobsTab }) {
       {tab === 'history' && <JobHistory agents={agents} action={action} />}
       {tab === 'schedules' && <SchedulesTab agents={agents} action={action} />}
       {tab === 'scripts' && <ScriptsTab agents={agents} action={action} />}
+      {tab === 'files' && <PackagesTab agents={agents} action={action} />}
     </>
   );
 }
@@ -510,6 +515,25 @@ export const SHELLS: { id: ScriptShell; label: string; family: 'windows' | 'unix
   { id: 'bash', label: 'bash (macOS, Linux)', family: 'unix' },
   { id: 'zsh', label: 'zsh (macOS)', family: 'unix' },
 ];
+type AfterDeploy = 'none' | 'msi' | 'exe' | 'zip' | 'custom';
+const AFTER_DEPLOY: { id: AfterDeploy; label: string; shell?: ScriptShell; script?: string }[] = [
+  { id: 'none', label: 'Nic — tylko skopiuj' },
+  {
+    id: 'msi',
+    label: 'Zainstaluj MSI (po cichu)',
+    shell: 'powershell',
+    script: "$p = Start-Process msiexec.exe -ArgumentList '/i', ('\"' + $env:OVERVNC_FILE + '\"'), '/qn', '/norestart' -Wait -PassThru\n# 3010 = zainstalowano, wymagany restart\nif ($p.ExitCode -eq 3010) { 'Wymagany restart'; exit 0 }\nexit $p.ExitCode",
+  },
+  {
+    id: 'exe',
+    label: 'Uruchom instalator EXE (po cichu)',
+    shell: 'powershell',
+    script: "# parametry cichej instalacji zależą od programu: /S (NSIS), /VERYSILENT (Inno Setup), /quiet\n$p = Start-Process $env:OVERVNC_FILE -ArgumentList '/S' -Wait -PassThru\nexit $p.ExitCode",
+  },
+  { id: 'zip', label: 'Rozpakuj ZIP obok pliku', shell: 'powershell', script: 'Expand-Archive -Path $env:OVERVNC_FILE -DestinationPath (Split-Path $env:OVERVNC_FILE) -Force' },
+  { id: 'custom', label: 'Własne polecenie', script: '' },
+];
+
 export const TIMEOUTS = [60, 300, 600, 1800, 3600, 7200, 14400];
 export const WAITS: { h: number; label: string }[] = [
   { h: 0, label: 'Tylko komputery online — pozostałe pominąć' },
@@ -531,6 +555,7 @@ export function NewJobModal({
   preselected,
   initialKind = 'script',
   initialScript,
+  initialPackage,
 }: {
   open: boolean;
   onClose: () => void;
@@ -539,6 +564,8 @@ export function NewJobModal({
   initialKind?: JobKind;
   /** wczytany skrypt z biblioteki („Uruchom” w zakładce Skrypty) */
   initialScript?: LibraryScript;
+  /** plik do wdrożenia („Wdróż” w zakładce Pliki) */
+  initialPackage?: Package;
 }) {
   const [kind, setKind] = useState<JobKind>(initialKind);
   const [ids, setIds] = useState<string[]>(preselected);
@@ -558,6 +585,13 @@ export function NewJobModal({
   const [busy, setBusy] = useState(false);
   const [library, setLibrary] = useState<LibraryScript[] | null>(null);
   const [saveName, setSaveName] = useState<string | null>(null);
+  const [packages, setPackages] = useState<Package[] | null>(null);
+  const [pkgId, setPkgId] = useState<number | null>(null);
+  const [deployDir, setDeployDir] = useState('');
+  const [overwrite, setOverwrite] = useState(true);
+  const [after, setAfter] = useState<AfterDeploy>('none');
+  const [uploading, setUploading] = useState<{ name: string; sent: number; size: number } | null>(null);
+  const uploadAbort = useRef<AbortController | null>(null);
   const fixedTargets = preselected.length > 0;
 
   const loadScript = (sc: LibraryScript) => {
@@ -601,12 +635,43 @@ export function NewJobModal({
     setSaveName(null);
     if (initialScript) loadScript(initialScript);
     api.scripts().then(setLibrary, () => setLibrary([]));
+    const unix = sel.length > 0 && sel.every((a) => a.os !== 'windows');
+    setDeployDir(unix ? '/tmp' : 'C:\\Users\\Public\\Downloads');
+    setOverwrite(true);
+    setAfter('none');
+    setPkgId(initialPackage?.id ?? null);
+    setUploading(null);
+    api.packages().then(setPackages, () => setPackages([]));
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // restart komputera, który włączy się za dwa dni, rzadko ma sens — domyślnie tylko online
   useEffect(() => {
     if (!waitTouched) setWaitHours(kind === 'power' ? 0 : 24);
   }, [kind, waitTouched]);
+
+  const uploadFile = async (file: File) => {
+    const sel = agents.filter((a) => ids.includes(a.id));
+    const clientIds = [...new Set(sel.map((a) => a.clientId))];
+    const ac = new AbortController();
+    uploadAbort.current = ac;
+    setUploading({ name: file.name, sent: 0, size: file.size });
+    try {
+      // plik wybranego klienta trafia do jego plików; przy komputerach kilku klientów — wspólny
+      const p = await api.uploadPackage(file, clientIds.length === 1 ? clientIds[0] : null, (sent) => setUploading({ name: file.name, sent, size: file.size }), ac.signal);
+      setPackages((list) => [p, ...(list ?? [])]);
+      setPkgId(p.id);
+      toast('Wysłano plik');
+    } catch (e) {
+      if (!ac.signal.aborted) toast(errorMessage(e), 'err');
+    } finally {
+      setUploading(null);
+      uploadAbort.current = null;
+    }
+  };
+  // zamknięcie okna przerywa wysyłanie
+  useEffect(() => {
+    if (!open) uploadAbort.current?.abort();
+  }, [open]);
 
   const selected = useMemo(() => agents.filter((a) => ids.includes(a.id)), [agents, ids]);
   const onlineCount = selected.filter((a) => a.online).length;
@@ -627,6 +692,17 @@ export function NewJobModal({
       body = { kind, agentIds: ids, waitHours, params: { text: msgText, title: msgTitle, seconds: msgSeconds } };
     } else if (kind === 'power') {
       body = { kind, agentIds: ids, waitHours, params: { action: powerAction, delayMinutes: delay, message: powerMsg } };
+    } else if (kind === 'deploy') {
+      if (!pkgId) return setError('Wybierz albo wyślij plik.');
+      if (!deployDir.trim()) return setError('Podaj folder docelowy.');
+      const run = after !== 'none';
+      if (run && !script.trim()) return setError('Wpisz polecenie instalacji albo wybierz „tylko skopiuj”.');
+      body = {
+        kind,
+        agentIds: ids,
+        waitHours,
+        params: { packageId: pkgId, dir: deployDir.trim(), overwrite, shell, script: run ? script : '', asUser, timeoutSec: Math.max(timeoutSec, 60) },
+      };
     } else {
       body = { kind, agentIds: ids, waitHours };
     }
@@ -650,7 +726,9 @@ export function NewJobModal({
         ? `Wyślij na: ${comp(n)}`
         : kind === 'power'
           ? `${powerAction === 'reboot' ? 'Uruchom ponownie' : 'Wyłącz'}: ${comp(n)}`
-          : `Odśwież: ${comp(n)}`;
+          : kind === 'deploy'
+            ? `Wdróż na: ${comp(n)}`
+            : `Odśwież: ${comp(n)}`;
 
   return (
     <Modal open={open} onClose={onClose} wide>
@@ -812,6 +890,122 @@ export function NewJobModal({
             <Field label="Komunikat dla użytkownika" hint="Opcjonalnie — pokaże się przed restartem (Windows).">
               <input className="pole" value={powerMsg} onChange={(e) => setPowerMsg(e.target.value)} maxLength={200} />
             </Field>
+          </>
+        )}
+
+        {kind === 'deploy' && (
+          <>
+            <Field label="Plik" group hint="Plik trafia na serwer raz, komputery pobierają go same (także te, które włączą się później).">
+              {uploading ? (
+                <div className="upload-row">
+                  <div className="small ellipsis">
+                    Wysyłanie: <strong>{uploading.name}</strong> — {bytes(uploading.sent)} z {bytes(uploading.size)}
+                  </div>
+                  <div className="jp-track">
+                    <span className="jp-seg run" style={{ width: `${(uploading.sent / Math.max(1, uploading.size)) * 100}%` }} />
+                  </div>
+                  <Button type="button" size="sm" variant="ghost" onClick={() => uploadAbort.current?.abort()}>
+                    Anuluj
+                  </Button>
+                </div>
+              ) : (
+                <div className="inline-form">
+                  <select className="pole" value={pkgId ?? ''} onChange={(e) => setPkgId(e.target.value ? Number(e.target.value) : null)}>
+                    <option value="">{packages && packages.some((p) => p.ready) ? 'Wybierz wysłany plik…' : 'Brak plików — wyślij nowy'}</option>
+                    {(packages ?? [])
+                      .filter((p) => p.ready)
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({bytes(p.size)})
+                        </option>
+                      ))}
+                  </select>
+                  <label className="btn btn-secondary btn-sm">
+                    <Upload /> Wyślij plik
+                    <input
+                      type="file"
+                      hidden
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = '';
+                        if (f) void uploadFile(f);
+                      }}
+                    />
+                  </label>
+                </div>
+              )}
+            </Field>
+            <div className="form-2">
+              <Field label="Folder docelowy" hint="Pełna ścieżka; brakujące foldery zostaną utworzone.">
+                <input className="pole mono" value={deployDir} onChange={(e) => setDeployDir(e.target.value)} spellCheck={false} autoCapitalize="off" />
+              </Field>
+              <Field label="Po zapisaniu pliku">
+                <select
+                  className="pole"
+                  value={after}
+                  onChange={(e) => {
+                    const a = e.target.value as AfterDeploy;
+                    setAfter(a);
+                    const tpl = AFTER_DEPLOY.find((x) => x.id === a);
+                    if (tpl?.script !== undefined) {
+                      setScript(tpl.script);
+                      setShell(tpl.shell ?? shell);
+                    }
+                  }}
+                >
+                  {AFTER_DEPLOY.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            {after !== 'none' && (
+              <>
+                <div className="form-2">
+                  <Field label="Powłoka">
+                    <select className="pole" value={shell} onChange={(e) => setShell(e.target.value as ScriptShell)}>
+                      {SHELLS.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Limit czasu instalacji">
+                    <select className="pole" value={timeoutSec} onChange={(e) => setTimeoutSec(Number(e.target.value))}>
+                      {TIMEOUTS.map((s) => (
+                        <option key={s} value={s}>
+                          {timeoutLabel(s)}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+                <Field label="Polecenie" hint={<>Ścieżka zapisanego pliku jest w zmiennej <code>OVERVNC_FILE</code>. Kod zakończenia inny niż 0 oznacza błąd.</>}>
+                  <textarea className="pole mono script-input" value={script} onChange={(e) => setScript(e.target.value)} rows={5} spellCheck={false} autoCapitalize="off" autoCorrect="off" />
+                </Field>
+                <label className={`choice ${asUser ? 'on' : ''}`}>
+                  <input type="checkbox" className="cb" checked={asUser} onChange={(e) => setAsUser(e.target.checked)} />
+                  <span>
+                    Jako zalogowany użytkownik
+                    <small>Domyślnie instalacja działa jako usługa z pełnymi uprawnieniami (bez okna UAC).</small>
+                  </span>
+                </label>
+              </>
+            )}
+            <label className={`choice ${overwrite ? 'on' : ''}`}>
+              <input type="checkbox" className="cb" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} />
+              <span>
+                Nadpisz, jeśli plik już istnieje
+                <small>Identyczny plik nie jest pobierany drugi raz.</small>
+              </span>
+            </label>
+            <div className="callout callout-warning">
+              <TriangleAlert />
+              <div className="small">Na kioskach z ochroną przed zapisem (UWF) plik i instalacja znikną po restarcie — wdrażaj w trybie serwisowym albo do folderu wykluczonego z ochrony.</div>
+            </div>
           </>
         )}
 

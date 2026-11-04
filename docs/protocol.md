@@ -96,6 +96,7 @@ W `hello` agent wysyła listę obsługiwanych poleceń. Serwer odrzuca polecenie
 | `update.check` | 0.6.0 | natychmiastowe sprawdzenie i instalacja aktualizacji; wynik `{status: up_to_date \| restarting \| skipped \| disabled}` |
 | `script.run` `{runId, shell, script, timeoutSec, asUser}` | 0.13.0 | jednorazowy skrypt (zadania); wynik `{exitCode, output, truncated, timedOut, durationMs, user}`; wyjście: pierwsze 48 KB + ostatnie 16 KB. Skrypt działa niezależnie od połączenia; ten sam `runId` nie uruchamia go drugi raz. `asUser` (możliwość `script.user`): w sesji zalogowanego użytkownika |
 | `script.result` `{runId}` | 0.13.0 | wynik uruchomienia sprzed rozłączenia (czeka, jeśli trwa); wyniki trzymane 1 h; `unknown_run` po restarcie agenta |
+| `deploy.run` `{runId, url, name, size, sha256, dir, overwrite, shell, script, timeoutSec, asUser}` | 0.15.0 | wdrożenie pliku: pobranie z serwera (`GET /api/agent/packages/:id`, klucz agenta, wznawianie przez `Range`; serwer udostępnia plik tylko komputerom z oczekującym zadaniem), weryfikacja rozmiaru i SHA-256, zapis atomowy w `dir`, opcjonalny skrypt instalacji (ścieżka w `OVERVNC_FILE`); wynik jak `script.run`, odbiór po rozłączeniu przez `script.result` |
 
 ### Pulpit zdalny
 

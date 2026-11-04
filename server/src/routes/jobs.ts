@@ -5,7 +5,9 @@ import { audit } from '../db.ts';
 import { HttpError, notFound, parse } from '../errors.ts';
 import { actorOf, requireUser } from '../auth.ts';
 import { assertAgentAccess, scopeSql } from '../scope.ts';
-import type { JobKind, JobParams } from '../jobs.ts';
+import type { DeployParams, JobKind, JobParams } from '../jobs.ts';
+import type { PackageRow } from './packages.ts';
+import { canSeeOwned } from './scripts.ts';
 import { MessageBody } from './kiosk.ts';
 
 const MAX_TARGETS = 500;
@@ -27,6 +29,16 @@ const PowerParams = z.object({
   message: z.string().max(200).default(''),
 });
 
+const DeployInput = z.object({
+  packageId: z.number().int().positive(),
+  dir: z.string().trim().min(2, 'Podaj folder docelowy.').max(400),
+  overwrite: z.boolean().default(true),
+  shell: z.enum(['powershell', 'pwsh', 'cmd', 'bash', 'zsh', 'sh']).default('powershell'),
+  script: z.string().max(64 * 1024).default(''),
+  asUser: z.boolean().default(false),
+  timeoutSec: z.number().int().min(10).max(4 * 3600).default(1800),
+});
+
 const Common = {
   agentIds: z.array(z.uuid()).min(1, 'Wybierz co najmniej jeden komputer.').max(MAX_TARGETS),
   /** ile godzin czekać na komputery offline (0 = tylko te, które są teraz online) */
@@ -38,6 +50,7 @@ const CreateBody = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('message'), params: MessageBody, ...Common }),
   z.object({ kind: z.literal('power'), params: PowerParams, ...Common }),
   z.object({ kind: z.literal('inventory'), params: z.object({}).default({}), ...Common }),
+  z.object({ kind: z.literal('deploy'), params: DeployInput, ...Common }),
 ]);
 
 const IdParams = z.object({ id: z.coerce.number().int().positive() });
@@ -76,6 +89,8 @@ export function defaultTitle(kind: JobKind, params: any): string {
       return (params.action === 'reboot' ? 'Restart' : 'Wyłączenie') + (params.delayMinutes ? ` za ${params.delayMinutes} min` : '');
     case 'inventory':
       return 'Odświeżenie inwentarza';
+    case 'deploy':
+      return `Wdrożenie: ${params.name}`;
   }
 }
 
@@ -134,12 +149,22 @@ export async function jobRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post('/api/jobs', remote, async (req) => {
     const body = parse(CreateBody, req.body);
     const ids = [...new Set(body.agentIds)];
-    for (const id of ids) assertAgentAccess(db, req.user!, id);
-    const title = body.title || defaultTitle(body.kind, body.params);
+    const clientsOf = ids.map((id) => assertAgentAccess(db, req.user!, id).clientId);
+    let params: JobParams = body.params as JobParams;
+    if (body.kind === 'deploy') {
+      // dane pliku zamrożone w zadaniu — agent sprawdza rozmiar i SHA-256
+      const p = db.prepare('SELECT * FROM packages WHERE id = ?').get(body.params.packageId) as PackageRow | undefined;
+      if (!p || !canSeeOwned(req.user!, p.client_id)) throw new HttpError(400, 'validation', 'Nieznany plik.');
+      if (!p.completed_at || !p.sha256) throw new HttpError(409, 'not_ready', 'Plik nie został jeszcze w całości wysłany.');
+      if (p.client_id !== null && clientsOf.some((c) => c !== p.client_id)) throw new HttpError(400, 'validation', 'Plik należy do innego klienta niż część wybranych komputerów.');
+      const d = body.params;
+      params = { ...d, script: d.script.trim() ? d.script : '', packageId: p.id, name: p.name, size: p.size, sha256: p.sha256 };
+    }
+    const title = body.title || defaultTitle(body.kind, params);
     const jobId = jobs.create({
       kind: body.kind,
       title,
-      params: body.params as JobParams,
+      params,
       agentIds: ids,
       waitMs: Math.round(body.waitHours * HOUR),
       userId: req.user!.id,
@@ -149,6 +174,7 @@ export async function jobRoutes(app: FastifyInstance, ctx: Ctx) {
     if (body.kind === 'script') Object.assign(details, { shell: body.params.shell, asUser: body.params.asUser, script: body.params.script.slice(0, 2000) });
     if (body.kind === 'message') details.text = body.params.text;
     if (body.kind === 'power') Object.assign(details, { action: body.params.action, delayMinutes: body.params.delayMinutes });
+    if (body.kind === 'deploy') Object.assign(details, { file: (params as DeployParams).name, dir: body.params.dir, script: body.params.script.slice(0, 2000) || undefined });
     audit(db, actorOf(req), 'job.create', ids.length === 1 ? ids[0] : null, details, req.ip);
     return { id: jobId };
   });

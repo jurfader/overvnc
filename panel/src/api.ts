@@ -491,12 +491,50 @@ export const api = {
   updateSchedule: (id: number, b: ScheduleInput) => request<Schedule>('PUT', `/api/schedules/${id}`, b),
   deleteSchedule: (id: number) => request<Ok>('DELETE', `/api/schedules/${id}`),
   runSchedule: (id: number) => request<{ jobId: number }>('POST', `/api/schedules/${id}/run`, {}),
+  packages: () => request<Package[]>('GET', '/api/packages'),
+  deletePackage: (id: number) => request<Ok>('DELETE', `/api/packages/${id}`),
+  /** Wysyła plik kawałkami po 8 MB (limit Cloudflare 100 MB na żądanie); po przerwie wznawia od miejsca, które zna serwer. */
+  uploadPackage: async (file: File, clientId: number | null, onProgress: (sent: number) => void, signal?: AbortSignal): Promise<Package> => {
+    const p = await request<Package & { chunkSize: number }>('POST', '/api/packages', { name: file.name, size: file.size, clientId });
+    let off = 0;
+    let pkg: Package = p;
+    let retries = 0;
+    while (off < file.size) {
+      if (signal?.aborted) {
+        await request('DELETE', `/api/packages/${p.id}`).catch(() => {});
+        throw new ApiError(0, 'aborted', 'Anulowano wysyłanie.');
+      }
+      const res = await fetch(`/api/packages/${p.id}/data?offset=${off}`, {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: file.slice(off, off + p.chunkSize),
+      }).catch(() => null);
+      const data = res ? await res.json().catch(() => ({})) : {};
+      if (res?.ok) {
+        pkg = data as Package;
+        off = pkg.received;
+        retries = 0;
+        onProgress(off);
+        continue;
+      }
+      // serwer ma inny stan (np. kawałek doszedł, ale odpowiedź nie) — wznawiamy od jego miejsca
+      if (res?.status === 409 && data?.details?.received !== undefined) {
+        off = data.details.received;
+        continue;
+      }
+      if (res && res.status < 500) throw new ApiError(res.status, data?.error ?? 'http_' + res.status, data?.message ?? res.statusText);
+      if (++retries > 5) throw new ApiError(0, 'network', 'Przerwane połączenie — spróbuj ponownie.');
+      await new Promise((r) => setTimeout(r, retries * 1500));
+    }
+    return pkg;
+  },
 
 };
 
 // ---------- zadania ----------
 
-export type JobKind = 'script' | 'message' | 'power' | 'inventory';
+export type JobKind = 'script' | 'message' | 'power' | 'inventory' | 'deploy';
 export type JobTargetStatus = 'queued' | 'running' | 'ok' | 'failed' | 'expired' | 'canceled' | 'lost';
 export type ScriptShell = 'powershell' | 'pwsh' | 'cmd' | 'bash' | 'zsh' | 'sh';
 
@@ -512,6 +550,7 @@ export type JobInput = { agentIds: string[]; waitHours: number; title?: string }
   | { kind: 'message'; params: { text: string; title?: string; seconds?: number } }
   | { kind: 'power'; params: { action: 'reboot' | 'shutdown'; delayMinutes?: number; message?: string } }
   | { kind: 'inventory'; params?: Record<string, never> }
+  | { kind: 'deploy'; params: DeployJobParams }
 );
 
 export interface Job {
@@ -604,4 +643,27 @@ export interface Schedule {
   lastRunAt: number | null;
   lastJob: { id: number; finished: boolean; total: number; ok: number } | null;
   createdBy: string;
+}
+
+export interface Package {
+  id: number;
+  name: string;
+  description: string;
+  size: number;
+  received: number;
+  sha256: string | null;
+  ready: boolean;
+  clientId: number | null;
+  createdBy: string;
+  createdAt: number;
+}
+
+export interface DeployJobParams {
+  packageId: number;
+  dir: string;
+  overwrite: boolean;
+  shell: ScriptShell;
+  script: string;
+  asUser: boolean;
+  timeoutSec: number;
 }

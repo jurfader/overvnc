@@ -21,6 +21,7 @@ export async function setup(overrides: Partial<Config> = {}) {
     keyFile: null,
     requireMfa: false,
     updatesDir: mkdtempSync(path.join(tmpdir(), 'overvnc-updates-')),
+    packagesDir: mkdtempSync(path.join(tmpdir(), 'overvnc-packages-')),
     github: null,
     ...overrides,
   };

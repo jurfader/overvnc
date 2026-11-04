@@ -282,4 +282,20 @@ export const MIGRATIONS: string[] = [
 
   ALTER TABLE jobs ADD COLUMN schedule_id INTEGER REFERENCES schedules(id) ON DELETE SET NULL;
   `,
+
+  // 10 — pliki do wdrażania (instalatory, konfiguracje); dane na dysku w DATA_DIR/packages (v0.15.0)
+  `
+  CREATE TABLE packages (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    name         TEXT NOT NULL,
+    description  TEXT NOT NULL DEFAULT '',
+    size         INTEGER NOT NULL,
+    received     INTEGER NOT NULL DEFAULT 0,  -- wysyłanie kawałkami (wznawialne)
+    sha256       TEXT,                        -- po zakończeniu wysyłania
+    client_id    INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+    created_by   TEXT NOT NULL,
+    created_at   INTEGER NOT NULL,
+    completed_at INTEGER
+  );
+  `,
 ];

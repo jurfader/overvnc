@@ -201,8 +201,8 @@ function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme
   else if (path === '/clients') page = <Clients />;
   else if (path === '/alerts') page = <Alerts />;
   else if (path === '/wall' && can('agents.remote')) page = <Wall agents={list} />;
-  else if ((path === '/jobs' || path === '/jobs/schedules' || path === '/jobs/scripts') && can('agents.remote'))
-    page = <Jobs agents={list} tab={path === '/jobs/schedules' ? 'schedules' : path === '/jobs/scripts' ? 'scripts' : 'history'} />;
+  else if (['/jobs', '/jobs/schedules', '/jobs/scripts', '/jobs/files'].includes(path) && can('agents.remote'))
+    page = <Jobs agents={list} tab={path === '/jobs/schedules' ? 'schedules' : path === '/jobs/scripts' ? 'scripts' : path === '/jobs/files' ? 'files' : 'history'} />;
   else if (/^\/jobs\/\d+$/.test(path) && can('agents.remote')) page = <JobPage key={path} id={Number(path.slice(6))} agents={agents} />;
   else if (path === '/tokens' && can('tokens.manage')) page = <Tokens />;
   else if (path === '/team' && can('team.manage')) page = <Team />;

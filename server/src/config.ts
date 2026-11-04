@@ -25,6 +25,8 @@ export interface Config {
   maxUploadBytes: number;
   /** Katalog wydań agenta (pobranych z GitHuba). */
   updatesDir: string;
+  /** Pliki do wdrażania na komputery (zadania „Wdrożenie”). */
+  packagesDir: string;
   /** Źródło wydań: prywatne repo GitHub (GITHUB_REPO=jurfader/overvnc, GITHUB_TOKEN tylko do odczytu). */
   github: { repo: string; token: string } | null;
   /** Klucz publiczny wydań (base64, Ed25519) — domyślnie wbudowany; zmiana tylko przy rotacji klucza. */
@@ -46,6 +48,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     requireMfa: env.REQUIRE_2FA !== '0',
     maxUploadBytes: Number(env.MAX_UPLOAD_MB ?? 10 * 1024) * 1024 * 1024,
     updatesDir: path.join(dataDir, 'updates'),
+    packagesDir: path.join(dataDir, 'packages'),
     github: env.GITHUB_REPO && env.GITHUB_TOKEN ? { repo: env.GITHUB_REPO, token: env.GITHUB_TOKEN } : null,
     releasePublicKey: env.RELEASE_PUBLIC_KEY ?? RELEASE_PUBLIC_KEY,
   };

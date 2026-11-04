@@ -32,6 +32,7 @@ import { jobRoutes } from './routes/jobs.ts';
 import { JobRunner } from './jobs.ts';
 import { Scheduler } from './schedules.ts';
 import { scriptRoutes } from './routes/scripts.ts';
+import { packageRoutes } from './routes/packages.ts';
 import { loadOrCreateKey } from './crypto.ts';
 
 const CSP = [
@@ -144,6 +145,7 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
   await installRoutes(app, ctx);
   await jobRoutes(app, ctx);
   await scriptRoutes(app, ctx);
+  await packageRoutes(app, ctx);
 
   if (config.panelDir && existsSync(config.panelDir)) {
     // bez wildcard:false — pliki są serwowane dynamicznie, więc przebudowa panelu nie wymaga restartu
