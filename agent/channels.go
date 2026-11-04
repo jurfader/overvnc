@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	pty "github.com/aymanbagabas/go-pty"
@@ -246,37 +248,48 @@ func handleTermOpen(ctx context.Context, data json.RawMessage) (any, error) {
 		return nil, err
 	}
 
-	// wyjście powłoki -> serwer; koniec procesu -> zdarzenie channel.closed
+	// wyjście powłoki -> serwer
+	var lastOutput atomic.Int64
+	lastOutput.Store(time.Now().UnixNano())
+	readerDone := make(chan struct{})
 	go func() {
+		defer close(readerDone)
 		buf := make([]byte, termReadBuf)
 		for {
 			n, err := p.Read(buf)
 			if n > 0 {
+				lastOutput.Store(time.Now().UnixNano())
 				if werr := sess.writeBinary(encodeFrame(frameData, req.Channel, buf[:n])); werr != nil {
-					break
+					return
 				}
 			}
 			if err != nil {
-				if !errors.Is(err, io.EOF) {
+				if !errors.Is(err, io.EOF) && !errors.Is(err, os.ErrClosed) {
 					logger.Infof("terminal %d: %v", req.Channel, err)
 				}
-				break
+				return
 			}
 		}
+	}()
+
+	// koniec procesu -> zamknięcie PTY -> zdarzenie channel.closed.
+	// Nie czekamy na EOF z odczytu: na Linuksie (otwarty slave w procesie agenta) i z ConPTY na Windows
+	// odczyt NIE kończy się sam po wyjściu powłoki. Najpierw dajemy dopłynąć ostatnim danym.
+	go func() {
 		exit := -1
-		done := make(chan struct{})
-		go func() {
-			if cmd.Wait() == nil || cmd.ProcessState != nil {
-				exit = cmd.ProcessState.ExitCode()
-			}
-			close(done)
-		}()
-		select {
-		case <-done:
-		case <-time.After(3 * time.Second):
+		if err := cmd.Wait(); err == nil || cmd.ProcessState != nil {
+			exit = cmd.ProcessState.ExitCode()
+		}
+		drainUntil := time.Now().Add(time.Second)
+		for time.Now().Before(drainUntil) && time.Since(time.Unix(0, lastOutput.Load())) < 100*time.Millisecond {
+			time.Sleep(20 * time.Millisecond)
 		}
 		sess.channels.remove(req.Channel)
-		t.close()
+		t.close() // zamyka PTY — odblokowuje odczyt
+		select {
+		case <-readerDone:
+		case <-time.After(2 * time.Second):
+		}
 		_ = sess.event("channel.closed", map[string]any{"channel": req.Channel, "exitCode": exit})
 	}()
 
