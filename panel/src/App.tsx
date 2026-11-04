@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { BellRing, Building2, ChevronRight, CloudDownload, LogOut, Menu, Monitor, Moon, PlusCircle, ScrollText, Sun, UserCog, Users, X, type LucideIcon } from 'lucide-react';
+import { BellRing, Building2, ChevronRight, LayoutGrid, CloudDownload, LogOut, Menu, Monitor, Moon, PlusCircle, ScrollText, Sun, UserCog, Users, X, type LucideIcon } from 'lucide-react';
 import { api, type Agent, type Me, type Permission } from './api.ts';
 import { useLiveEvents, type LiveEvent } from './live.ts';
 import { applyTheme, readTheme, Toasts, type Theme } from './components.tsx';
@@ -15,6 +15,7 @@ import { Team } from './pages/Team.tsx';
 import { Account } from './pages/Account.tsx';
 import { Updates } from './pages/Updates.tsx';
 import { Alerts } from './pages/Alerts.tsx';
+import { Wall } from './pages/Wall.tsx';
 
 /** Routing w hashu: "#/sciezka?param=wartosc". */
 function useHashRoute(): { path: string; query: URLSearchParams } {
@@ -171,6 +172,7 @@ function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme
           countTone: 'danger',
           countTitle: 'niepotwierdzone alerty',
         },
+        { href: '/wall', label: 'Ekrany', icon: LayoutGrid, perm: 'agents.remote', match: (p) => p === '/wall' },
         { href: '/clients', label: 'Klienci', icon: Building2, perm: 'agents.view', match: (p) => p === '/clients' },
         { href: '/tokens', label: 'Dodaj komputer', icon: PlusCircle, perm: 'tokens.manage', match: (p) => p === '/tokens' },
       ],
@@ -193,6 +195,7 @@ function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme
   if (detail) page = <MachineDetail key={detail[1]} id={detail[1]} live={agents.get(detail[1])} tab={(detail[2] as DetailTab) ?? 'overview'} filePath={query.get('path')} />;
   else if (path === '/clients') page = <Clients />;
   else if (path === '/alerts') page = <Alerts />;
+  else if (path === '/wall' && can('agents.remote')) page = <Wall agents={list} />;
   else if (path === '/tokens' && can('tokens.manage')) page = <Tokens />;
   else if (path === '/team' && can('team.manage')) page = <Team />;
   else if (path === '/audit' && can('audit.view') && me.allClients) page = <Audit />;

@@ -115,6 +115,17 @@ for i in $(seq 50); do grep -q "wejście k code=KeyQ" "$WORK/agent.log" && break
 grep -q "wejście k code=KeyQ" "$WORK/agent.log" || fail "klawisz nie dotarł do komputera"
 echo "✔ pulpit: monitory, klatki z potwierdzeniami (tempo), klawisz dotarł do komputera"
 
+# kiosk: zrzut ekranu (osobny proces pomocnika w trybie „snapshot”) i komunikat na ekranie
+CID=$(curl -sf -b "$J" -X POST -H 'content-type: application/json' -d '{"name":"Kioski e2e","consentMode":"none"}' "$B/api/clients" | json .id) || fail "klient kiosku"
+curl -sf -b "$J" -X PATCH -H 'content-type: application/json' -d "{\"clientId\":$CID}" "$B/api/agents/$ID" >/dev/null || fail "przypisanie kiosku"
+curl -sf -b "$J" -o "$WORK/shot.jpg" -D "$WORK/shot.h" "$B/api/agents/$ID/screenshot?w=320" || fail "zrzut ekranu"
+[ "$(head -c 3 "$WORK/shot.jpg" | od -An -tx1 | tr -d ' ')" = "ffd8ff" ] || fail "zrzut nie jest JPEG"
+grep -qi "x-screen-size: 320x" "$WORK/shot.h" || fail "zrzut ma złą szerokość: $(grep -i x-screen-size "$WORK/shot.h")"
+curl -sf -b "$J" -X POST -H 'content-type: application/json' -d '{"text":"Przerwa techniczna e2e","seconds":30}' "$B/api/agents/$ID/message" >/dev/null || fail "komunikat"
+for _ in $(seq 50); do grep -q "Przerwa techniczna e2e" "$WORK/agent.log" && break; sleep 0.1; done
+grep -q "Przerwa techniczna e2e" "$WORK/agent.log" || fail "komunikat nie dotarł do komputera"
+echo "✔ kiosk: zrzut ekranu (JPEG $(wc -c <"$WORK/shot.jpg" | tr -d ' ') B, 320 px) i komunikat na ekranie"
+
 curl -sf -b "$J" -X DELETE "$B/api/agents/$ID" >/dev/null || fail "usuwanie"
 for _ in $(seq 50); do grep -q "odrzucił" "$WORK/agent.log" && break; sleep 0.1; done
 grep -q "odrzucił" "$WORK/agent.log" || fail "agent nie został odrzucony po usunięciu"

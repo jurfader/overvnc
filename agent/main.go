@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/kardianos/service"
 )
@@ -105,6 +106,10 @@ func main() {
 
 	case "desktop-helper":
 		// proces pomocniczy pulpitu zdalnego — uruchamiany przez usługę w sesji użytkownika
+		if fs.Arg(0) == "snapshot" {
+			maxW, _ := strconv.Atoi(fs.Arg(1))
+			os.Exit(runDesktopSnapshot(maxW))
+		}
 		os.Exit(runDesktopHelper())
 
 	case "enroll":

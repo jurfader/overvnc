@@ -128,3 +128,39 @@ func TestScanCodes(t *testing.T) {
 		t.Error("nieznany kod nie może mieć scancode'u")
 	}
 }
+
+func TestDownscaleBGRA(t *testing.T) {
+	// 4×2: lewa połowa czysto czerwona, prawa niebieska (BGRA)
+	w, h := 4, 2
+	bgra := make([]byte, w*h*4)
+	for y := range h {
+		for x := range w {
+			i := (y*w + x) * 4
+			if x < 2 {
+				bgra[i+2] = 200 // R
+			} else {
+				bgra[i] = 100 // B
+			}
+			bgra[i+3] = 255
+		}
+	}
+	img := downscaleBGRA(bgra, w, h, 2)
+	if img.Bounds().Dx() != 2 || img.Bounds().Dy() != 1 {
+		t.Fatalf("wymiary %v, oczekiwano 2×1 (proporcje zachowane)", img.Bounds())
+	}
+	if r, g, b := img.Pix[0], img.Pix[1], img.Pix[2]; r != 200 || g != 0 || b != 0 {
+		t.Errorf("lewy piksel RGB = %d,%d,%d, oczekiwano 200,0,0 (BGRA -> RGBA)", r, g, b)
+	}
+	if r, b := img.Pix[4], img.Pix[6]; r != 0 || b != 100 {
+		t.Errorf("prawy piksel R=%d B=%d, oczekiwano 0 i 100", r, b)
+	}
+	// mniejszy niż limit — bez zmiany rozmiaru
+	if s := downscaleBGRA(bgra, w, h, 640); s.Bounds().Dx() != 4 || s.Bounds().Dy() != 2 {
+		t.Errorf("obraz mniejszy od limitu nie powinien być skalowany: %v", s.Bounds())
+	}
+	// mieszanie bloku: 2×2 -> 1×1 z dwóch kolorów = średnia
+	mix := []byte{0, 0, 100, 255, 0, 0, 200, 255, 0, 0, 100, 255, 0, 0, 200, 255}
+	if m := downscaleBGRA(mix, 2, 2, 1); m.Pix[0] != 150 {
+		t.Errorf("średnia czerwieni = %d, oczekiwano 150", m.Pix[0])
+	}
+}

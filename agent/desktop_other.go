@@ -31,12 +31,12 @@ func (h *execHelper) kill() {
 	}
 }
 
-func spawnDesktopHelper() (helperProc, error) {
+func spawnDesktopHelper(args ...string) (helperProc, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(exe, "desktop-helper")
+	cmd := exec.Command(exe, append([]string{"desktop-helper"}, args...)...)
 	cmd.Stderr = nil
 	in, err := cmd.StdinPipe()
 	if err != nil {
@@ -116,3 +116,9 @@ func (s *syntheticBackend) input(ev InputEvent, m MonitorInfo) error {
 }
 
 func (s *syntheticBackend) close() {}
+
+// showScreenMessage — tryb testowy: komunikat trafia do logu agenta (testy e2e sprawdzają, że dotarł).
+func showScreenMessage(title, text string, seconds int) error {
+	logger.Infof("komunikat na ekranie (%d s): %s — %s", seconds, title, text)
+	return nil
+}

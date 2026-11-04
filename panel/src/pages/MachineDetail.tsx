@@ -6,6 +6,7 @@ import { useAlerts, useMe } from '../state.tsx';
 import { alertValue, lasting } from './Alerts.tsx';
 import { OrganizeModal } from './organize.tsx';
 import { MonitoringView } from './remote/MonitoringView.tsx';
+import { KioskCard } from './remote/KioskCard.tsx';
 import { ProcessesView } from './remote/ProcessesView.tsx';
 import { ServicesView } from './remote/ServicesView.tsx';
 import { FilesView } from './remote/FilesView.tsx';
@@ -223,6 +224,8 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
             </div>
           </StatTile>
         </section>
+
+        {remote && <KioskCard agent={a} />}
 
         <section className="glass-card card anim-rise" style={{ animationDelay: '140ms' }}>
           <CardHead icon={Building2} title="Organizacja">

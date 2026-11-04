@@ -833,3 +833,25 @@ textarea.pole.editor-area { font: 12.5px/1.55 var(--font-mono); height: 58vh; mi
   .term-keys, .detail-tabs { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); padding-right: 36px; scrollbar-width: none; }
   .detail-tabs::-webkit-scrollbar { display: none; }
 }
+
+/* ---------- kiosk: ekran, ściana ekranów ---------- */
+.kiosk-actions { width: auto; }
+.kiosk-shot { position: relative; display: block; width: 100%; max-width: 760px; aspect-ratio: 16 / 9; padding: 0; border: 1px solid var(--glass-border); border-radius: var(--radius-md); background: #050508; overflow: hidden; cursor: zoom-in; }
+.kiosk-shot img, .wall-shot img, .big-shot img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.kiosk-shot-time { position: absolute; right: 8px; bottom: 8px; padding: 2px 8px; border-radius: 99px; font-size: 11px; color: #e6e6f0; background: rgb(0 0 0 / 0.6); }
+.big-shot { aspect-ratio: 16 / 9; width: 100%; background: #050508; border-radius: var(--radius-md); overflow: hidden; }
+.okno.wide:has(.big-shot) { max-width: 1100px; }
+.shot-placeholder { display: grid; place-content: center; justify-items: center; gap: 8px; width: 100%; height: 100%; padding: 12px; text-align: center; color: #9a9ab0; font-size: 12.5px; }
+.shot-placeholder svg { width: 22px; height: 22px; opacity: 0.7; }
+
+.wall-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 14px; }
+.wall-tile { display: flex; flex-direction: column; padding: 0; overflow: hidden; color: inherit; transition: transform 0.15s, border-color 0.15s; }
+.wall-tile:hover { transform: translateY(-2px); border-color: rgb(var(--primary) / 0.4); }
+.wall-tile.alerting { border-color: rgb(var(--danger) / 0.45); }
+.wall-tile.off .wall-shot { opacity: 0.55; }
+.wall-shot { aspect-ratio: 16 / 9; background: #050508; }
+.wall-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; }
+.wall-badges { display: flex; align-items: center; gap: 8px; flex: none; }
+@media (max-width: 720px) {
+  .kiosk-card .card-head .toolbar { width: 100%; }
+}

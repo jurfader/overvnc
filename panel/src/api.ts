@@ -437,6 +437,10 @@ export const api = {
   deleteUser: (id: number) => request<Ok>('DELETE', `/api/users/${id}`),
 
   audit: () => request<AuditEntry[]>('GET', '/api/audit?limit=300'),
+  // kiosk: zrzut ekranu (miniatury) i komunikat na ekranie
+  screenshotUrl: (id: string, w = 640) => `/api/agents/${id}/screenshot?w=${w}`,
+  screenMessage: (id: string, body: { text: string; title?: string; seconds?: number }) => request<Ok>('POST', `/api/agents/${id}/message`, body),
+
   // alerty i powiadomienia
   alerts: (state: 'open' | 'all', agentId?: string) =>
     request<AlertItem[]>('GET', `/api/alerts?state=${state}${agentId ? `&agentId=${agentId}` : ''}`),

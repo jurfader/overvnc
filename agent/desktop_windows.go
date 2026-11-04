@@ -118,7 +118,8 @@ func (h *winHelper) kill() {
 
 // spawnDesktopHelper uruchamia „desktop-helper” jako SYSTEM w sesji użytkownika (token usługi
 // z podmienionym identyfikatorem sesji) — widzi wtedy także ekran blokady i okna UAC.
-func spawnDesktopHelper() (helperProc, error) {
+// args: dodatkowe argumenty (np. "snapshot 640" — jednorazowy zrzut ekranu).
+func spawnDesktopHelper(args ...string) (helperProc, error) {
 	sid, err := targetSession()
 	if err != nil {
 		return nil, err
@@ -170,7 +171,11 @@ func spawnDesktopHelper() (helperProc, error) {
 		StdErr:     nul,
 	}
 	si.Cb = uint32(unsafe.Sizeof(si))
-	cmd, _ := windows.UTF16PtrFromString(`"` + exe + `" desktop-helper`)
+	line := `"` + exe + `" desktop-helper`
+	for _, a := range args {
+		line += " " + windows.EscapeArg(a)
+	}
+	cmd, _ := windows.UTF16PtrFromString(line)
 	var pi windows.ProcessInformation
 	// ForkLock: w czasie tworzenia procesu inne wątki nie mogą tworzyć dziedziczonych uchwytów
 	syscall.ForkLock.Lock()
@@ -528,4 +533,14 @@ func (b *gdiBackend) close() {
 	if b.desk != 0 {
 		_, _, _ = procCloseDesktop.Call(b.desk)
 	}
+}
+
+// showScreenMessage wyświetla okno komunikatu w sesji z ekranem (nie czeka na zamknięcie).
+func showScreenMessage(title, text string, seconds int) error {
+	sid, err := targetSession()
+	if err != nil {
+		return err
+	}
+	_, err = wtsSendMessage(sid, title, text, mbOK|mbIconInfo|mbSetForeground|mbSystemModal, uint32(seconds), false)
+	return err
 }
