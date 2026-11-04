@@ -9,6 +9,9 @@ import (
 	"image"
 	"image/jpeg"
 	"io"
+	"runtime"
+	"sync"
+	"sync/atomic"
 )
 
 // Pulpit zdalny — wspólne elementy usługi i procesu pomocniczego.
@@ -122,50 +125,88 @@ func (e *frameEncoder) encode(bgra []byte, w, h int, quality string) ([]byte, er
 	}
 	jq, scale := qualitySettings(quality)
 	full := e.prev == nil || e.w != w || e.h != h
-	var tiles bytes.Buffer
-	count := 0
+
+	// 1) zmienione kafelki (porównanie wierszami — bytes.Equal jest wektoryzowane)
+	var jobs []tileJob
 	for ty := 0; ty < h; ty += tileSize {
 		th := min(tileSize, h-ty)
 		for tx := 0; tx < w; tx += tileSize {
 			tw := min(tileSize, w-tx)
-			if !full && !tileChanged(e.prev, bgra, w, tx, ty, tw, th) {
-				continue
+			if full || tileChanged(e.prev, bgra, w, tx, ty, tw, th) {
+				jobs = append(jobs, tileJob{tx, ty, tw, th})
 			}
-			img := tileRGBA(bgra, w, tx, ty, tw, th, scale)
-			var jb bytes.Buffer
-			if err := jpeg.Encode(&jb, img, &jpeg.Options{Quality: jq}); err != nil {
-				return nil, err
-			}
-			var hdr [12]byte
-			binary.BigEndian.PutUint16(hdr[0:], uint16(tx/scale))
-			binary.BigEndian.PutUint16(hdr[2:], uint16(ty/scale))
-			binary.BigEndian.PutUint16(hdr[4:], uint16(img.Rect.Dx()))
-			binary.BigEndian.PutUint16(hdr[6:], uint16(img.Rect.Dy()))
-			binary.BigEndian.PutUint32(hdr[8:], uint32(jb.Len()))
-			tiles.Write(hdr[:])
-			tiles.Write(jb.Bytes())
-			count++
 		}
 	}
-	if len(e.prev) != len(bgra) {
-		e.prev = make([]byte, len(bgra))
+
+	// 2) kodowanie JPEG równolegle — przy pełnej zmianie ekranu to ponad 90% czasu klatki
+	encoded := make([][]byte, len(jobs))
+	var firstErr error
+	var errMu sync.Mutex
+	var next atomic.Int64
+	var wg sync.WaitGroup
+	for range min(encodeWorkers, len(jobs)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var jb bytes.Buffer
+			for {
+				i := int(next.Add(1) - 1)
+				if i >= len(jobs) {
+					return
+				}
+				j := jobs[i]
+				img := tileRGBA(bgra, w, j.x, j.y, j.w, j.h, scale)
+				jb.Reset()
+				if err := jpeg.Encode(&jb, img, &jpeg.Options{Quality: jq}); err != nil {
+					errMu.Lock()
+					firstErr = err
+					errMu.Unlock()
+					return
+				}
+				out := make([]byte, 12+jb.Len())
+				binary.BigEndian.PutUint16(out[0:], uint16(j.x/scale))
+				binary.BigEndian.PutUint16(out[2:], uint16(j.y/scale))
+				binary.BigEndian.PutUint16(out[4:], uint16(img.Rect.Dx()))
+				binary.BigEndian.PutUint16(out[6:], uint16(img.Rect.Dy()))
+				binary.BigEndian.PutUint32(out[8:], uint32(jb.Len()))
+				copy(out[12:], jb.Bytes())
+				encoded[i] = out
+			}
+		}()
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+
+	if len(e.prev) != w*h*4 {
+		e.prev = make([]byte, w*h*4)
 	}
 	copy(e.prev, bgra[:w*h*4])
 	e.w, e.h = w, h
-	if count == 0 {
+	if len(jobs) == 0 {
 		return nil, nil
 	}
 	e.seq++
-	var out bytes.Buffer
-	var head [10]byte
-	binary.BigEndian.PutUint32(head[0:], e.seq)
-	binary.BigEndian.PutUint16(head[4:], uint16((w+scale-1)/scale))
-	binary.BigEndian.PutUint16(head[6:], uint16((h+scale-1)/scale))
-	binary.BigEndian.PutUint16(head[8:], uint16(count))
-	out.Write(head[:])
-	out.Write(tiles.Bytes())
-	return out.Bytes(), nil
+	size := 10
+	for _, t := range encoded {
+		size += len(t)
+	}
+	out := make([]byte, 10, size)
+	binary.BigEndian.PutUint32(out[0:], e.seq)
+	binary.BigEndian.PutUint16(out[4:], uint16((w+scale-1)/scale))
+	binary.BigEndian.PutUint16(out[6:], uint16((h+scale-1)/scale))
+	binary.BigEndian.PutUint16(out[8:], uint16(len(jobs)))
+	for _, t := range encoded {
+		out = append(out, t...)
+	}
+	return out, nil
 }
+
+type tileJob struct{ x, y, w, h int }
+
+// encodeWorkers — równoległe kodowanie kafelków; jeden rdzeń zostaje dla programów na komputerze (np. kiosku).
+var encodeWorkers = min(6, max(1, runtime.NumCPU()-1))
 
 func tileChanged(prev, cur []byte, stride, x, y, w, h int) bool {
 	for row := y; row < y+h; row++ {

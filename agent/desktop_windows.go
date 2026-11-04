@@ -224,9 +224,8 @@ var (
 )
 
 const (
-	srcCopy    = 0x00CC0020
-	captureBlt = 0x40000000
-	diNormal   = 3
+	srcCopy  = 0x00CC0020
+	diNormal = 3
 
 	inputMouse    = 0
 	inputKeyboard = 1
@@ -319,6 +318,7 @@ type gdiBackend struct {
 	oldObj   uintptr
 	bits     unsafe.Pointer
 	w, h     int
+	out      []byte // bufor klatki używany ponownie (bez 8 MB nowej pamięci na każdą klatkę)
 }
 
 var (
@@ -440,15 +440,20 @@ func (b *gdiBackend) capture(m MonitorInfo) ([]byte, int, int, error) {
 	if screen == 0 {
 		return nil, 0, 0, errors.New("GetDC")
 	}
-	r, _, err := procBitBlt.Call(b.memDC, 0, 0, uintptr(m.W), uintptr(m.H), screen, uintptr(int32(m.X)), uintptr(int32(m.Y)), srcCopy|captureBlt)
+	// bez CAPTUREBLT: przy kompozycji DWM (Windows 8+) okna warstwowe i tak są w obrazie, a ta flaga
+	// wielokrotnie spowalnia BitBlt na słabszych procesorach i powoduje miganie kursora
+	r, _, err := procBitBlt.Call(b.memDC, 0, 0, uintptr(m.W), uintptr(m.H), screen, uintptr(int32(m.X)), uintptr(int32(m.Y)), srcCopy)
 	_, _, _ = procReleaseDC.Call(0, screen)
 	if r == 0 {
 		return nil, 0, 0, fmt.Errorf("BitBlt: %v", err)
 	}
 	b.drawCursor(m)
-	out := make([]byte, m.W*m.H*4)
-	copy(out, unsafe.Slice((*byte)(b.bits), len(out)))
-	return out, m.W, m.H, nil
+	n := m.W * m.H * 4
+	if len(b.out) != n {
+		b.out = make([]byte, n)
+	}
+	copy(b.out, unsafe.Slice((*byte)(b.bits), n))
+	return b.out, m.W, m.H, nil
 }
 
 func (b *gdiBackend) drawCursor(m MonitorInfo) {

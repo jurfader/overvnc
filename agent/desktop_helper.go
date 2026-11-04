@@ -22,7 +22,7 @@ type desktopBackend interface {
 
 const (
 	helperFrameInterval = 66 * time.Millisecond // maks. ~15 kl./s
-	helperMaxCredits    = 2                     // najwyżej 2 klatki „w drodze” do przeglądarki
+	helperMaxCredits    = 3                     // najwyżej 3 klatki „w drodze” (przy opóźnieniu łącza przez Cloudflare 2 to za mało)
 	helperInfoInterval  = 2 * time.Second
 )
 
