@@ -28,6 +28,7 @@ import {
   type LucideIcon,
   FolderOpen,
   MoreHorizontal,
+  ShieldAlert,
 } from 'lucide-react';
 import { api, errorMessage, type Agent, type DirListing, type FileEntry, type FsRoot } from '../../api.ts';
 import { Button, Checkbox, Dropdown, EmptyState, Field, Modal, toast } from '../../components.tsx';
@@ -312,6 +313,17 @@ export function FilesView({ agent, initialPath }: { agent: Agent; initialPath: s
         </div>
 
         {error && <div className="callout callout-warning">{error}</div>}
+        {error && agent.os === 'darwin' && /brak dostępu/i.test(error) && (
+          <div className="callout callout-brand">
+            <ShieldAlert />
+            <div className="small">
+              <strong>macOS chroni ten folder (Biurko, Dokumenty, Pobrane i inne) także przed kontem root.</strong> Na tym Macu otwórz{' '}
+              <em>Ustawienia systemowe → Prywatność i ochrona → Pełny dostęp do dysku</em>, kliknij <strong>+</strong>, naciśnij Cmd+Shift+G i wybierz{' '}
+              <code>/usr/local/bin/overvnc-agent</code>, włącz przełącznik, a potem uruchom agenta ponownie:{' '}
+              <code>sudo /usr/local/bin/overvnc-agent stop &amp;&amp; sudo /usr/local/bin/overvnc-agent start</code>
+            </div>
+          </div>
+        )}
 
         <div
           className={`glass-card table-card dropzone ${dragOver ? 'over' : ''}`}

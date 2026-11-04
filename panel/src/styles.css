@@ -866,3 +866,4 @@ textarea.pole.editor-area { font: 12.5px/1.55 var(--font-mono); height: 58vh; mi
 .manual-install summary { cursor: pointer; font-size: 13px; color: rgb(var(--ink-2)); }
 .manual-install summary:hover { color: rgb(var(--ink)); }
 .cmd-row code { min-width: 0; }
+.callout code { overflow-wrap: anywhere; font: 12px var(--font-mono); padding: 1px 5px; border-radius: 5px; background: rgb(var(--fill) / 0.07); }
