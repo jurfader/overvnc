@@ -166,4 +166,43 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX metrics_history_ts ON metrics_history(ts);
   `,
+
+  // 6 — alerty: reguły (offline / procesor / pamięć / dysk) i zdarzenia alertów (v0.9.0)
+  `
+  CREATE TABLE alert_rules (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    name         TEXT NOT NULL,
+    kind         TEXT NOT NULL,                 -- offline | cpu | mem | disk
+    threshold    REAL NOT NULL DEFAULT 0,       -- % (dla offline nieużywany)
+    duration_min INTEGER NOT NULL DEFAULT 0,    -- jak długo warunek musi trwać
+    client_id    INTEGER REFERENCES clients(id) ON DELETE CASCADE, -- NULL = wszystkie komputery
+    enabled      INTEGER NOT NULL DEFAULT 1,
+    notify       INTEGER NOT NULL DEFAULT 1,    -- powiadomienie push (Pushover)
+    created_at   INTEGER NOT NULL
+  );
+
+  CREATE TABLE alerts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_id     INTEGER REFERENCES alert_rules(id) ON DELETE SET NULL,
+    agent_id    TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    detail      TEXT NOT NULL DEFAULT '',
+    value       REAL,
+    started_at  INTEGER NOT NULL,
+    resolved_at INTEGER,
+    ack_by      TEXT,
+    ack_at      INTEGER
+  );
+  CREATE INDEX alerts_started ON alerts(started_at DESC);
+  CREATE INDEX alerts_agent ON alerts(agent_id, started_at DESC);
+  -- najwyżej jeden otwarty alert danej reguły na komputer
+  CREATE UNIQUE INDEX alerts_one_open ON alerts(rule_id, agent_id) WHERE resolved_at IS NULL;
+
+  INSERT INTO alert_rules (name, kind, threshold, duration_min, created_at) VALUES
+    ('Komputer offline', 'offline', 0, 10, CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+    ('Prawie pełny dysk', 'disk', 90, 5, CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+    ('Wysokie obciążenie procesora', 'cpu', 95, 15, CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+    ('Mało wolnej pamięci', 'mem', 95, 15, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+  `,
 ];

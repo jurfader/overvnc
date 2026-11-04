@@ -17,8 +17,11 @@ const START: Record<string, string> = { auto: 'Automatyczny', manual: 'Ręczny',
 const DONE_LABEL: Record<ServiceAction, string> = { start: 'uruchomiono', stop: 'zatrzymano', restart: 'uruchomiono ponownie', enable: 'włączono autostart', disable: 'wyłączono autostart' };
 const ACTION_LABEL: Record<ServiceAction, string> = { start: 'Uruchomić', stop: 'Zatrzymać', restart: 'Uruchomić ponownie', enable: 'Włączyć autostart', disable: 'Wyłączyć autostart' };
 
+const PAGE = 150; // tyle wierszy naraz — na telefonie każdy wiersz to karta
+
 export function ServicesView({ agent }: { agent: Agent }) {
   const [list, setList] = useState<ServiceInfo[] | null>(null);
+  const [limit, setLimit] = useState(PAGE);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState('');
@@ -94,7 +97,7 @@ export function ServicesView({ agent }: { agent: Agent }) {
 
       <div className="glass-card table-card">
         <div className="table-scroll scroll" style={{ maxHeight: 'calc(100vh - 330px)', minHeight: 300 }}>
-          <table className="table hover compact-rows">
+          <table className="table hover compact-rows stack">
             <thead className="sticky">
               <tr>
                 <th>Usługa</th>
@@ -111,22 +114,22 @@ export function ServicesView({ agent }: { agent: Agent }) {
                   </td>
                 </tr>
               )}
-              {rows.map((s) => {
+              {rows.slice(0, limit).map((s) => {
                 const st = STATUS[s.status];
                 const isBusy = busy === s.name;
                 const running = s.status === 'running';
                 return (
                   <tr key={s.name}>
-                    <td style={{ maxWidth: 480 }}>
+                    <td className="s-main" style={{ maxWidth: 480 }}>
                       <div className="strong ellipsis" title={s.description || s.displayName}>
                         {s.displayName}
                       </div>
                       {s.displayName !== s.name && <div className="muted mono ellipsis">{s.name}</div>}
                     </td>
-                    <td>
+                    <td className="s-meta">
                       <Badge variant={st.variant}>{st.label}</Badge>
                     </td>
-                    <td>
+                    <td className="s-meta" data-label="Autostart:">
                       {s.startType && s.startType !== 'static' && agent.os !== 'darwin' ? (
                         <select
                           className="pole"
@@ -143,7 +146,7 @@ export function ServicesView({ agent }: { agent: Agent }) {
                         <span className="small ink-2">{START[s.startType]}</span>
                       )}
                     </td>
-                    <td>
+                    <td className="s-end">
                       <div className="menu-actions">
                         {isBusy ? (
                           <span className="spinner" style={{ margin: 8 }} />
@@ -162,6 +165,13 @@ export function ServicesView({ agent }: { agent: Agent }) {
             </tbody>
           </table>
         </div>
+        {rows.length > limit && (
+          <div className="show-more">
+            <Button variant="ghost" onClick={() => setLimit((n) => n + PAGE)}>
+              Pokaż więcej ({rows.length - limit} usług)
+            </Button>
+          </div>
+        )}
       </div>
 
       <Modal open={!!confirm} onClose={() => setConfirm(null)}>

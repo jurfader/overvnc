@@ -35,6 +35,47 @@ export interface MetricSample {
 
 export type MetricRange = '1h' | '6h' | '24h' | '7d';
 
+export type AlertKind = 'offline' | 'cpu' | 'mem' | 'disk';
+
+export interface AlertItem {
+  id: number;
+  ruleId: number | null;
+  agentId: string;
+  hostname: string;
+  label: string;
+  clientId: number | null;
+  clientName: string | null;
+  kind: AlertKind;
+  title: string;
+  /** np. punkt montowania dysku */
+  detail: string;
+  value: number | null;
+  startedAt: number;
+  resolvedAt: number | null;
+  ackBy: string | null;
+  ackAt: number | null;
+}
+
+export interface AlertRule {
+  id: number;
+  name: string;
+  kind: AlertKind;
+  threshold: number;
+  durationMin: number;
+  clientId: number | null;
+  clientName: string | null;
+  enabled: boolean;
+  notify: boolean;
+}
+
+export type AlertRuleInput = Omit<AlertRule, 'id' | 'clientName'>;
+
+export interface NotificationSettings {
+  pushover: { configured: boolean; userHint: string | null };
+  panelUrl: string | null;
+}
+
+
 export interface Agent {
   id: string;
   hostname: string;
@@ -396,4 +437,17 @@ export const api = {
   deleteUser: (id: number) => request<Ok>('DELETE', `/api/users/${id}`),
 
   audit: () => request<AuditEntry[]>('GET', '/api/audit?limit=300'),
+  // alerty i powiadomienia
+  alerts: (state: 'open' | 'all', agentId?: string) =>
+    request<AlertItem[]>('GET', `/api/alerts?state=${state}${agentId ? `&agentId=${agentId}` : ''}`),
+  ackAlert: (id: number) => request<AlertItem>('POST', `/api/alerts/${id}/ack`, {}),
+  alertRules: () => request<AlertRule[]>('GET', '/api/alert-rules'),
+  createAlertRule: (r: AlertRuleInput) => request<{ id: number }>('POST', '/api/alert-rules', r),
+  updateAlertRule: (id: number, r: AlertRuleInput) => request<Ok>('PUT', `/api/alert-rules/${id}`, r),
+  deleteAlertRule: (id: number) => request<Ok>('DELETE', `/api/alert-rules/${id}`),
+  notificationSettings: () => request<NotificationSettings>('GET', '/api/settings/notifications'),
+  saveNotificationSettings: (body: { token?: string; user?: string; clear?: boolean }) =>
+    request<NotificationSettings>('PUT', '/api/settings/notifications', body),
+  testNotification: () => request<Ok>('POST', '/api/settings/notifications/test', {}),
+
 };

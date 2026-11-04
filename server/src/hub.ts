@@ -142,6 +142,16 @@ export class Hub {
   private metrics?: MetricsStore;
   private pingTimer: NodeJS.Timeout;
   private closed = false;
+  /** Słuchacze zdarzeń agentów (np. silnik alertów); błąd słuchacza nie przerywa obsługi agenta. */
+  listeners: { metrics?: (agentId: string, data: Record<string, unknown>) => void; connected?: (agentId: string) => void } = {};
+
+  private notify<K extends keyof Hub['listeners']>(name: K, ...args: Parameters<NonNullable<Hub['listeners'][K]>>): void {
+    try {
+      (this.listeners[name] as ((...a: unknown[]) => void) | undefined)?.(...args);
+    } catch (err) {
+      console.error(`hub: słuchacz ${name}:`, err);
+    }
+  }
 
   constructor(db: Db, metrics?: MetricsStore) {
     this.db = db;
@@ -203,6 +213,7 @@ export class Hub {
     });
 
     this.broadcastAgent(agentId, { type: 'agent_online', id: agentId, data: this.summary(agentId) });
+    this.notify('connected', agentId);
   }
 
   private handleAgentMessage(agentId: string, conn: AgentConn, msg: Envelope): void {
@@ -229,6 +240,7 @@ export class Hub {
         this.db.prepare('UPDATE agents SET metrics_json = ?, last_seen = ? WHERE id = ?').run(JSON.stringify(msg.data ?? {}), now, agentId);
         this.metrics?.record(agentId, (msg.data ?? null) as Record<string, unknown> | null);
         this.broadcastAgent(agentId, { type: 'agent_metrics', id: agentId, data: msg.data });
+        if (msg.data && typeof msg.data === 'object') this.notify('metrics', agentId, msg.data as Record<string, unknown>);
         break;
       }
       case 'channel.closed': {

@@ -63,7 +63,7 @@ export function Team() {
       ) : (
         <div className="glass-card table-card anim-rise" style={{ animationDelay: '40ms' }}>
           <div className="table-scroll">
-            <table className="table hover">
+            <table className="table hover stack">
               <thead>
                 <tr>
                   <th>Osoba</th>
@@ -79,7 +79,7 @@ export function Team() {
                   const self = m.id === me.id;
                   return (
                     <tr key={m.id} style={m.disabled ? { opacity: 0.55 } : undefined}>
-                      <td>
+                      <td className="s-main">
                         <div className="host">
                           <span className="avatar" style={{ width: 32, height: 32, fontSize: 11 }}>
                             {(m.displayName || m.username).slice(0, 2).toUpperCase()}
@@ -92,19 +92,19 @@ export function Team() {
                           </div>
                         </div>
                       </td>
-                      <td>
+                      <td className="s-meta">
                         <Badge variant={ROLE_BADGE[m.role]}>{ROLE_LABELS[m.role]}</Badge>
                       </td>
-                      <td className="small">{scopeOf(m)}</td>
-                      <td>
+                      <td className="small s-full" data-label="Dostęp:">{scopeOf(m)}</td>
+                      <td className="s-meta">
                         <div className="member-meta">
                           {m.disabled && <Badge variant="danger">Zablokowane</Badge>}
                           {m.mfaEnabled ? <Badge variant="success">2FA</Badge> : <Badge variant="warning">bez 2FA</Badge>}
                           {m.mustChangePassword && <Badge>hasło tymczasowe</Badge>}
                         </div>
                       </td>
-                      <td className="small ink-2">{m.lastLoginAt ? ago(m.lastLoginAt) : 'nigdy'}</td>
-                      <td>
+                      <td className="small ink-2 s-meta" data-label="Logowanie:">{m.lastLoginAt ? ago(m.lastLoginAt) : 'nigdy'}</td>
+                      <td className="s-end">
                         <div className="menu-actions">
                           <Button size="sm" variant="ghost" icon={Pencil} title="Edytuj" onClick={() => setDialog({ kind: 'edit', member: m })} />
                           <Button

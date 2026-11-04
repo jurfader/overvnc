@@ -1,8 +1,9 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { Activity, ArrowLeft, Building2, CloudDownload, Cog, MonitorSmartphone, FolderOpen, LayoutDashboard, LineChart, TerminalSquare, Clock, Cpu, HardDrive, Info, MemoryStick, Network, Package, Pencil, RefreshCw, Search, Trash2, Users } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowLeft, MoreHorizontal, Building2, CloudDownload, Cog, MonitorSmartphone, FolderOpen, LayoutDashboard, LineChart, TerminalSquare, Clock, Cpu, HardDrive, Info, MemoryStick, Network, Package, Pencil, RefreshCw, Search, Trash2, Users } from 'lucide-react';
 import { api, errorMessage, type Agent, type AgentDetail } from '../api.ts';
-import { Button, CardHead, ClientLabel, EmptyState, Meter, Modal, OsBadge, StatTile, Status, TagChip, toast } from '../components.tsx';
-import { useMe } from '../state.tsx';
+import { Button, CardHead, Dropdown, ClientLabel, EmptyState, Meter, Modal, OsBadge, StatTile, Status, TagChip, toast } from '../components.tsx';
+import { useAlerts, useMe } from '../state.tsx';
+import { alertValue, lasting } from './Alerts.tsx';
 import { OrganizeModal } from './organize.tsx';
 import { MonitoringView } from './remote/MonitoringView.tsx';
 import { ProcessesView } from './remote/ProcessesView.tsx';
@@ -36,6 +37,8 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
   const [editOpen, setEditOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
   const { can } = useMe();
+  const { byAgent } = useAlerts();
+  const machineAlerts = byAgent.get(id) ?? [];
   const remote = can('agents.remote');
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -69,6 +72,19 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
   const name = a.label || a.hostname;
   const visibleTabs = TABS.filter((t) => !t.remote || remote);
   const activeTab: DetailTab = visibleTabs.some((t) => t.key === tab) ? tab : 'overview';
+
+  const canUpgrade = can('agents.manage') && a.online && a.capabilities.includes('update.check');
+  const upgrade = async () => {
+    setUpdating(true);
+    try {
+      const r = await api.upgradeAgent(id);
+      toast(r.status === 'restarting' ? 'Aktualizacja zainstalowana — agent uruchamia się ponownie' : r.status === 'up_to_date' ? `Agent jest aktualny (${r.version})` : `Stan: ${r.status}`);
+    } catch (err) {
+      toast(errorMessage(err), 'err');
+    } finally {
+      setUpdating(false);
+    }
+  };
 
   const refresh = async () => {
     setRefreshing(true);
@@ -113,47 +129,62 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
           {remote && a.online && <PowerMenu agent={a} />}
           {remote && !a.online && <WakeButton agent={a} />}
           {can('agents.manage') && (
-            <Button icon={Pencil} onClick={() => setEditOpen(true)}>
+            <Button className="only-desktop" icon={Pencil} onClick={() => setEditOpen(true)}>
               Edytuj
             </Button>
           )}
-          {can('agents.manage') && a.online && a.capabilities.includes('update.check') && (
-            <Button
-              icon={CloudDownload}
-              loading={updating}
-              onClick={async () => {
-                setUpdating(true);
-                try {
-                  const r = await api.upgradeAgent(id);
-                  toast(r.status === 'restarting' ? 'Aktualizacja zainstalowana — agent uruchamia się ponownie' : r.status === 'up_to_date' ? `Agent jest aktualny (${r.version})` : `Stan: ${r.status}`);
-                } catch (err) {
-                  toast(errorMessage(err), 'err');
-                } finally {
-                  setUpdating(false);
-                }
-              }}
-            >
+          {canUpgrade && (
+            <Button className="only-desktop" icon={CloudDownload} loading={updating} onClick={upgrade}>
               Aktualizuj agenta
             </Button>
           )}
           {can('agents.refresh') && (
-            <Button icon={RefreshCw} onClick={refresh} disabled={!a.online} loading={refreshing} title={a.online ? undefined : 'Komputer jest offline'}>
+            <Button className="only-desktop" icon={RefreshCw} onClick={refresh} disabled={!a.online} loading={refreshing} title={a.online ? undefined : 'Komputer jest offline'}>
               Odśwież inwentarz
             </Button>
           )}
           {can('agents.manage') && (
-            <Button variant="danger" icon={Trash2} onClick={() => setDeleteOpen(true)}>
+            <Button className="only-desktop" variant="danger" icon={Trash2} onClick={() => setDeleteOpen(true)}>
               Usuń
             </Button>
           )}
+          {/* telefon: pozostałe akcje w jednym menu */}
+          <span className="only-mobile">
+            <Dropdown
+              icon={MoreHorizontal}
+              label="Więcej"
+              items={[
+                ...(can('agents.manage') ? [{ key: 'edit', label: 'Edytuj nazwę, klienta i tagi', icon: Pencil, onClick: () => setEditOpen(true) }] : []),
+                ...(canUpgrade ? [{ key: 'upgrade', label: 'Aktualizuj agenta', icon: CloudDownload, disabled: updating, onClick: upgrade }] : []),
+                ...(can('agents.refresh') ? [{ key: 'refresh', label: 'Odśwież inwentarz', icon: RefreshCw, disabled: !a.online || refreshing, onClick: refresh }] : []),
+                ...(can('agents.manage') ? [{ key: 'delete', label: 'Usuń komputer', icon: Trash2, danger: true, onClick: () => setDeleteOpen(true) }] : []),
+              ]}
+            />
+          </span>
         </div>
       </header>
+
+      {machineAlerts.length > 0 && (
+        <div className="callout callout-danger anim-rise" role="status">
+          <AlertTriangle />
+          <div style={{ flex: 1 }}>
+            {machineAlerts.map((al) => (
+              <div key={al.id}>
+                <strong>{al.title}</strong> <span className="muted">— {alertValue(al)} · trwa {lasting(al)}{al.ackBy ? ` · potwierdzone przez ${al.ackBy}` : ''}</span>
+              </div>
+            ))}
+          </div>
+          <a href="#/alerts" className="small">
+            Alerty →
+          </a>
+        </div>
+      )}
 
       {visibleTabs.length > 1 && (
         <nav className="detail-tabs anim-rise" aria-label="Widoki komputera">
           {visibleTabs.map((t) => (
-            <a key={t.key} href={`#/m/${id}${t.key === 'overview' ? '' : '/' + t.key}`} className={`detail-tab ${activeTab === t.key ? 'on' : ''}`} aria-current={activeTab === t.key ? 'page' : undefined}>
-              <t.icon /> {t.label}
+            <a key={t.key} href={`#/m/${id}${t.key === 'overview' ? '' : '/' + t.key}`} className={`detail-tab ${activeTab === t.key ? 'on' : ''}`} title={t.label} aria-current={activeTab === t.key ? 'page' : undefined}>
+              <t.icon /> <span className="tab-label">{t.label}</span>
             </a>
           ))}
         </nav>
@@ -288,15 +319,15 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
               </div>
               <div className="glass-card card">
                 <CardHead icon={Network} title="Interfejsy sieciowe" />
-                <table className="table compact">
+                <table className="table compact stack">
                   <tbody>
                     {(inv.network ?? []).map((n) => (
                       <tr key={n.name}>
-                        <td>
+                        <td className="s-main">
                           <div className="strong">{n.name}</div>
                           <div className="muted mono">{n.mac || '—'}</div>
                         </td>
-                        <td className="mono pre">{(n.addrs ?? []).join('\n')}</td>
+                        <td className="s-full mono addr-list">{(n.addrs ?? []).join('\n')}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -306,14 +337,14 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
 
             <section className="glass-card card anim-rise" style={{ animationDelay: '240ms' }}>
               <CardHead icon={Package} title={`Oprogramowanie (${inv.software?.length ?? 0})`}>
-                <div className="search" style={{ width: 260 }}>
+                <div className="search card-search">
                   <Search />
                   <input className="pole" placeholder="Szukaj programu…" value={swQuery} onChange={(e) => setSwQuery(e.target.value)} />
                 </div>
               </CardHead>
               {inv.softwareError && <div className="form-error">{inv.softwareError}</div>}
               <div className="scroll">
-                <table className="table compact">
+                <table className="table compact stack">
                   <thead className="sticky">
                     <tr>
                       <th>Nazwa</th>
@@ -324,9 +355,9 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
                   <tbody>
                     {software.map((s, i) => (
                       <tr key={`${s.name}-${i}`}>
-                        <td>{s.name}</td>
-                        <td className="mono">{s.version}</td>
-                        <td className="muted small">{s.publisher}</td>
+                        <td className="s-main">{s.name}</td>
+                        <td className="s-end mono small">{s.version}</td>
+                        <td className="s-full muted small">{s.publisher}</td>
                       </tr>
                     ))}
                     {software.length === 0 && (

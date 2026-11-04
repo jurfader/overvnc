@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ChevronDown, Lock, LogOut, Power, PowerOff, RotateCcw, Sunrise, TimerOff } from 'lucide-react';
 import { api, errorMessage, type Agent, type PowerAction } from '../../api.ts';
-import { Button, Field, Modal, toast } from '../../components.tsx';
+import { Button, Field, Modal, toast, useDismiss } from '../../components.tsx';
 
 const ITEMS: { action: PowerAction; label: string; icon: typeof Power; danger?: boolean }[] = [
   { action: 'reboot', label: 'Uruchom ponownie…', icon: RotateCcw },
@@ -31,20 +31,10 @@ const DELAYS = [
 export function PowerMenu({ agent }: { agent: Agent }) {
   const [open, setOpen] = useState(false);
   const [action, setAction] = useState<PowerAction | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
+  const closeMenu = useRef(() => setOpen(false)).current;
+  const ref = useDismiss<HTMLDivElement>(open, closeMenu);
   const items = ITEMS.filter((i) => agent.capabilities.includes(`power.${i.action}`));
 
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
-    document.addEventListener('mousedown', close);
-    document.addEventListener('keydown', esc);
-    return () => {
-      document.removeEventListener('mousedown', close);
-      document.removeEventListener('keydown', esc);
-    };
-  }, [open]);
 
   if (items.length === 0) return null;
   return (

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from 'react';
 import { AlertCircle, CheckCircle2, Copy, Download, Laptop, Monitor, Server, type LucideIcon } from 'lucide-react';
 import { osLabel } from './format.ts';
 
@@ -318,6 +318,73 @@ export function SecretBox({ lines, filename }: { lines: string[]; filename?: str
           </Button>
         )}
       </div>
+    </div>
+  );
+}
+
+// ---------- menu rozwijane ----------
+
+/**
+ * Zamyka menu po kliknięciu/dotknięciu poza nim i klawiszem Esc. Na telefonie menu jest panelem od dołu,
+ * a przyciemnione tło to pseudo-element kontenera — dotknięcie samego kontenera też zamyka menu.
+ */
+export function useDismiss<T extends HTMLElement>(open: boolean, onClose: () => void) {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: PointerEvent) => {
+      const el = ref.current;
+      if (!el || !el.contains(e.target as Node) || e.target === el) onClose();
+    };
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    document.addEventListener('pointerdown', away);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('pointerdown', away);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [open, onClose]);
+  return ref;
+}
+
+export interface MenuItem {
+  key: string;
+  label: ReactNode;
+  icon?: LucideIcon;
+  danger?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}
+
+/** Przycisk z menu akcji (na telefonie — panel od dołu ekranu). */
+export function Dropdown({ icon, label, title, items }: { icon?: LucideIcon; label?: ReactNode; title?: string; items: MenuItem[] }) {
+  const [open, setOpen] = useState(false);
+  const close = useRef(() => setOpen(false)).current;
+  const ref = useDismiss<HTMLDivElement>(open, close);
+  if (items.length === 0) return null;
+  return (
+    <div className="dropdown" ref={ref}>
+      <Button icon={icon} title={title} aria-label={title} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        {label}
+      </Button>
+      {open && (
+        <div className="dropdown-menu anim-pop" role="menu">
+          {items.map(({ key, label: l, icon: Icon, danger, disabled, onClick }) => (
+            <button
+              key={key}
+              role="menuitem"
+              disabled={disabled}
+              className={`dropdown-item ${danger ? 'danger' : ''}`}
+              onClick={() => {
+                setOpen(false);
+                onClick();
+              }}
+            >
+              {Icon && <Icon />} {l}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

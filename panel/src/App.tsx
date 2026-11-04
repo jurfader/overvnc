@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Building2, ChevronRight, CloudDownload, LogOut, Menu, Monitor, Moon, PlusCircle, ScrollText, Sun, UserCog, Users, X, type LucideIcon } from 'lucide-react';
+import { BellRing, Building2, ChevronRight, CloudDownload, LogOut, Menu, Monitor, Moon, PlusCircle, ScrollText, Sun, UserCog, Users, X, type LucideIcon } from 'lucide-react';
 import { api, type Agent, type Me, type Permission } from './api.ts';
 import { useLiveEvents, type LiveEvent } from './live.ts';
 import { applyTheme, readTheme, Toasts, type Theme } from './components.tsx';
-import { MeProvider, OrgProvider, orgChanged } from './state.tsx';
+import { AlertsProvider, alertEvent, MeProvider, OrgProvider, orgChanged, useAlerts } from './state.tsx';
 import { Login } from './pages/Login.tsx';
 import { Setup } from './pages/Setup.tsx';
 import { Machines } from './pages/Machines.tsx';
@@ -14,6 +14,7 @@ import { Clients } from './pages/Clients.tsx';
 import { Team } from './pages/Team.tsx';
 import { Account } from './pages/Account.tsx';
 import { Updates } from './pages/Updates.tsx';
+import { Alerts } from './pages/Alerts.tsx';
 
 /** Routing w hashu: "#/sciezka?param=wartosc". */
 function useHashRoute(): { path: string; query: URLSearchParams } {
@@ -72,7 +73,9 @@ export function App() {
     content = (
       <MeProvider me={me} reloadMe={reloadMe}>
         <OrgProvider>
-          <Shell me={me} theme={theme} onToggleTheme={toggleTheme} onLogout={logout} reloadMe={reloadMe} />
+          <AlertsProvider>
+            <Shell me={me} theme={theme} onToggleTheme={toggleTheme} onLogout={logout} reloadMe={reloadMe} />
+          </AlertsProvider>
         </OrgProvider>
       </MeProvider>
     );
@@ -92,6 +95,9 @@ interface NavItem {
   perm: Permission;
   match: (path: string) => boolean;
   count?: number;
+  /** licznik ostrzegawczy (czerwony) zamiast liczby online */
+  countTone?: 'danger';
+  countTitle?: string;
   /** dodatkowo wymaga dostępu do wszystkich klientów */
   global?: boolean;
 }
@@ -101,6 +107,7 @@ function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme
   const [menuOpen, setMenuOpen] = useState(false);
   const { path, query } = useHashRoute();
   const can = (p: Permission) => me.permissions.includes(p);
+  const { unacked } = useAlerts();
 
   useEffect(() => setMenuOpen(false), [path]);
 
@@ -111,6 +118,7 @@ function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme
 
   const onEvent = useCallback((e: LiveEvent) => {
     if (e.type === 'org_changed') return orgChanged();
+    if (e.type === 'alert_opened' || e.type === 'alert_resolved' || e.type === 'alert_updated') return alertEvent({ type: e.type, data: e.data });
     if (!e.id) return;
     const id = e.id;
     setAgents((prev) => {
@@ -140,6 +148,7 @@ function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme
   const onReconnect = useCallback(() => {
     loadAgents();
     orgChanged();
+    window.dispatchEvent(new Event('overvnc:alerts-reload'));
     void reloadMe();
   }, [loadAgents, reloadMe]);
   useLiveEvents(true, onEvent, onReconnect);
@@ -152,6 +161,16 @@ function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme
       title: 'Zarządzanie',
       items: [
         { href: '/', label: 'Komputery', icon: Monitor, perm: 'agents.view', match: (p) => p === '/' || p.startsWith('/m/'), count: online || undefined },
+        {
+          href: '/alerts',
+          label: 'Alerty',
+          icon: BellRing,
+          perm: 'agents.view',
+          match: (p) => p === '/alerts',
+          count: unacked || undefined,
+          countTone: 'danger',
+          countTitle: 'niepotwierdzone alerty',
+        },
         { href: '/clients', label: 'Klienci', icon: Building2, perm: 'agents.view', match: (p) => p === '/clients' },
         { href: '/tokens', label: 'Dodaj komputer', icon: PlusCircle, perm: 'tokens.manage', match: (p) => p === '/tokens' },
       ],
@@ -173,6 +192,7 @@ function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme
   let page;
   if (detail) page = <MachineDetail key={detail[1]} id={detail[1]} live={agents.get(detail[1])} tab={(detail[2] as DetailTab) ?? 'overview'} filePath={query.get('path')} />;
   else if (path === '/clients') page = <Clients />;
+  else if (path === '/alerts') page = <Alerts />;
   else if (path === '/tokens' && can('tokens.manage')) page = <Tokens />;
   else if (path === '/team' && can('team.manage')) page = <Team />;
   else if (path === '/audit' && can('audit.view') && me.allClients) page = <Audit />;
@@ -182,9 +202,20 @@ function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme
 
   return (
     <div className="layout">
-      <button className="mobile-toggle" onClick={() => setMenuOpen(true)} aria-label="Menu">
-        <Menu />
-      </button>
+      {/* telefon: górny pasek z menu, nazwą i alertami */}
+      <div className="mobile-bar">
+        <button className="mobile-toggle" onClick={() => setMenuOpen(true)} aria-label="Menu">
+          <Menu />
+        </button>
+        <a href="#/" className="mobile-brand">
+          <img src="/logo.png" alt="" />
+          <span className="gradient-text">OVERVNC</span>
+        </a>
+        <a href="#/alerts" className={`mobile-alerts ${unacked ? 'on' : ''}`} aria-label={unacked ? `Alerty: ${unacked} niepotwierdzonych` : 'Alerty'}>
+          <BellRing />
+          {unacked > 0 && <span className="count danger">{unacked}</span>}
+        </a>
+      </div>
       {menuOpen && <div className="sidebar-backdrop anim-fade" onClick={() => setMenuOpen(false)} />}
 
       <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
@@ -206,14 +237,14 @@ function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme
             <div key={g.title}>
               <div className="nav-group-title">{g.title}</div>
               <div className="nav-list">
-                {g.items.map(({ href, label, icon: Icon, match, count }) => {
+                {g.items.map(({ href, label, icon: Icon, match, count, countTone, countTitle }) => {
                   const active = match(path);
                   return (
                     <a key={href} href={`#${href}`} className={`nav-item ${active ? 'active' : ''}`} aria-current={active ? 'page' : undefined}>
                       <Icon />
                       <span className="label">{label}</span>
                       {count !== undefined && (
-                        <span className="count" title="online">
+                        <span className={`count ${countTone ?? ''}`} title={countTitle ?? 'online'}>
                           {count}
                         </span>
                       )}

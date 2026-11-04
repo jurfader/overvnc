@@ -28,7 +28,11 @@ async function mutate(fn: () => Promise<unknown>, okText?: string): Promise<bool
 
 export function Clients() {
   const { me, can } = useMe();
-  const { clients, tags } = useOrg();
+  const { clients, tags, reloadOrg } = useOrg();
+  // liczniki komputerów zmieniają się przy rejestracji nowych — przy wejściu pobierz aktualne
+  useEffect(() => {
+    void reloadOrg();
+  }, [reloadOrg]);
   const [tab, setTab] = useState<TabKey>('clients');
   const [editClient, setEditClient] = useState<Client | null | undefined>(undefined); // undefined = zamknięte, null = nowy
   const [editTag, setEditTag] = useState<Tag | null | undefined>(undefined);

@@ -68,6 +68,13 @@ export function MonitoringView({ agent }: { agent: Agent }) {
         </div>
       </div>
 
+      {hasData && view[0].ts - t0 > span * 0.1 && (
+        <div className="mon-note">
+          Historia jest zbierana od {new Date(view[0].ts).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} — wcześniejszych danych nie ma
+          {range !== '1h' ? ', krótszy zakres pokaże więcej szczegółów' : ''}.
+        </div>
+      )}
+
       {error ? (
         <EmptyState icon={LineChart} title="Nie udało się wczytać historii" text={error} />
       ) : loading && !hasData ? (
@@ -125,7 +132,7 @@ const IH = H - PAD.t - PAD.b;
 
 function Chart({ title, icon: Icon, series, t0, t1, percent = false, fmt, nowText }: { title: string; icon: typeof Cpu; series: Series[]; t0: number; t1: number; percent?: boolean; fmt: (v: number) => string; nowText?: string }) {
   const [hover, setHover] = useState<number | null>(null); // indeks próbki
-  const svgRef = useRef<SVGSVGElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
 
   const base = series[0].data;
   const yMax = useMemo(() => {
@@ -137,6 +144,9 @@ function Chart({ title, icon: Icon, series, t0, t1, percent = false, fmt, nowTex
 
   const x = (ts: number) => PAD.l + (IW * (ts - t0)) / Math.max(1, t1 - t0);
   const y = (v: number) => PAD.t + IH * (1 - Math.min(1, Math.max(0, v / yMax)));
+  // pozycje w % — punkty rysujemy w HTML, bo SVG z preserveAspectRatio="none" zamienia kółka w elipsy
+  const px = (ts: number) => `${(x(ts) / W) * 100}%`;
+  const py = (v: number) => `${(y(v) / H) * 100}%`;
 
   const paths = series.map((s) => {
     const pts = s.data.map((p) => ({ x: x(p.ts), y: y(s.value(p)) }));
@@ -145,9 +155,10 @@ function Chart({ title, icon: Icon, series, t0, t1, percent = false, fmt, nowTex
     return { line, area, color: s.color };
   });
 
-  const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
-    const rect = svgRef.current!.getBoundingClientRect();
-    const frac = (e.clientX - rect.left) / rect.width;
+  // mysz: najechanie; palec: przeciąganie po wykresie (pionowe przewijanie strony nadal działa)
+  const onPointer = (e: React.PointerEvent<HTMLDivElement>) => {
+    const rect = wrapRef.current!.getBoundingClientRect();
+    const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
     const ts = t0 + frac * (t1 - t0);
     let best = -1;
     let bestD = Infinity;
@@ -162,7 +173,12 @@ function Chart({ title, icon: Icon, series, t0, t1, percent = false, fmt, nowTex
   };
 
   const hv = hover != null && base[hover] ? base[hover] : null;
+  const last = base.length ? base[base.length - 1] : null;
   const gridY = percent ? [0, 25, 50, 75, 100] : [0, yMax / 2, yMax];
+  const hvFrac = hv ? Math.min(1, Math.max(0, (hv.ts - t0) / (t1 - t0))) : 0;
+  // podpowiedź przy krawędziach nie może wyjść poza wykres (na telefonie — poza ekran)
+  const tipShift = hvFrac < 0.25 ? '0%' : hvFrac > 0.75 ? '-100%' : '-50%';
+  const axis = [t0, (t0 + t1) / 2, t1];
 
   return (
     <div className="glass-card card chart-card">
@@ -172,8 +188,15 @@ function Chart({ title, icon: Icon, series, t0, t1, percent = false, fmt, nowTex
         </div>
         {nowText && <div className="chart-now mono">{nowText}</div>}
       </div>
-      <div className="chart-wrap">
-        <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="chart-svg" onMouseMove={onMove} onMouseLeave={() => setHover(null)} role="img" aria-label={title}>
+      <div
+        ref={wrapRef}
+        className="chart-wrap"
+        onPointerMove={onPointer}
+        onPointerDown={onPointer}
+        onPointerLeave={(e) => e.pointerType === 'mouse' && setHover(null)}
+        onPointerUp={(e) => e.pointerType !== 'mouse' && setTimeout(() => setHover(null), 1800)}
+      >
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="chart-svg" role="img" aria-label={title}>
           {gridY.map((g) => (
             <line key={g} x1={PAD.l} x2={W - PAD.r} y1={y(g)} y2={y(g)} className="chart-grid" />
           ))}
@@ -183,17 +206,15 @@ function Chart({ title, icon: Icon, series, t0, t1, percent = false, fmt, nowTex
               <path d={p.line} fill="none" stroke={p.color} strokeWidth={1.75} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
             </g>
           ))}
-          {hv && (
-            <>
-              <line x1={x(hv.ts)} x2={x(hv.ts)} y1={PAD.t} y2={PAD.t + IH} className="chart-cross" vectorEffect="non-scaling-stroke" />
-              {series.map((s, i) => (
-                <circle key={i} cx={x(hv.ts)} cy={y(s.value(hv))} r={3} fill={s.color} vectorEffect="non-scaling-stroke" />
-              ))}
-            </>
-          )}
+          {hv && <line x1={x(hv.ts)} x2={x(hv.ts)} y1={PAD.t} y2={PAD.t + IH} className="chart-cross" vectorEffect="non-scaling-stroke" />}
         </svg>
+        {/* ostatnia próbka — widoczna nawet wtedy, gdy historia jest jeszcze krótka */}
+        {last &&
+          !hv &&
+          series.map((s, i) => <span key={i} className="chart-point live" style={{ left: px(last.ts), top: py(s.value(last)), background: s.color }} />)}
+        {hv && series.map((s, i) => <span key={i} className="chart-point" style={{ left: px(hv.ts), top: py(s.value(hv)), background: s.color }} />)}
         {hv && (
-          <div className="chart-tip" style={{ left: `${Math.min(100, Math.max(0, ((hv.ts - t0) / (t1 - t0)) * 100))}%` }}>
+          <div className="chart-tip" style={{ left: `${hvFrac * 100}%`, transform: `translateX(${tipShift})` }}>
             <div className="chart-tip-time">{new Date(hv.ts).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
             {series.map((s, i) => (
               <div key={i} className="chart-tip-row">
@@ -204,6 +225,11 @@ function Chart({ title, icon: Icon, series, t0, t1, percent = false, fmt, nowTex
             ))}
           </div>
         )}
+      </div>
+      <div className="chart-axis" aria-hidden>
+        {axis.map((t, i) => (
+          <span key={i}>{i === 2 ? 'teraz' : axisLabel(t, t1 - t0)}</span>
+        ))}
       </div>
       {series.length > 1 && (
         <div className="chart-legend">
@@ -216,4 +242,10 @@ function Chart({ title, icon: Icon, series, t0, t1, percent = false, fmt, nowTex
       )}
     </div>
   );
+}
+
+/** Podpis osi czasu: godzina dla zakresów do doby, data dla dłuższych. */
+function axisLabel(ts: number, span: number): string {
+  const d = new Date(ts);
+  return span > 24 * 3600_000 ? d.toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit' }) : d.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' });
 }

@@ -125,7 +125,7 @@ export function Updates() {
           <div className="card" style={{ paddingBottom: 0 }}>
             <CardHead icon={Package} title="Wydania na serwerze" />
           </div>
-          <table className="table">
+          <table className="table stack">
             <thead>
               <tr>
                 <th>Wersja</th>
@@ -137,12 +137,12 @@ export function Updates() {
             <tbody>
               {st.releases.map((r) => (
                 <tr key={r.version}>
-                  <td className="strong">
+                  <td className="strong s-main">
                     {r.version} {r.version === st.target && <Badge variant="brand">docelowa</Badge>}
                   </td>
-                  <td className="small ink-2">{r.created ? dateTime(Date.parse(r.created)) : '—'}</td>
-                  <td className="small ink-2">{r.platforms.length}</td>
-                  <td className="right">
+                  <td className="small ink-2 s-meta" data-label="Opublikowano:">{r.created ? dateTime(Date.parse(r.created)) : '—'}</td>
+                  <td className="small ink-2 s-meta" data-label="Platformy:">{r.platforms.length}</td>
+                  <td className="right s-end">
                     {st.policy === 'manual' && r.version !== st.target && (
                       <Button
                         size="sm"

@@ -113,7 +113,7 @@ export function Tokens() {
           <CardHead icon={KeyRound} title="Tokeny" />
         </div>
         <div className="table-scroll">
-          <table className="table hover">
+          <table className="table hover stack">
             <thead>
               <tr>
                 <th>Opis</th>
@@ -131,15 +131,15 @@ export function Tokens() {
                 const used = t.usesLeft === 0;
                 return (
                   <tr key={t.id}>
-                    <td className="strong">{t.label}</td>
-                    <td>
+                    <td className="strong s-main">{t.label}</td>
+                    <td className="s-full">
                       <ClientLabel name={t.clientName} site={t.siteName} />
                     </td>
-                    <td>{expired ? <Badge>Wygasł</Badge> : used ? <Badge>Wykorzystany</Badge> : <Badge variant="success">Aktywny</Badge>}</td>
-                    <td>{t.usesLeft ?? '∞'}</td>
-                    <td className="small ink-2">{dateTime(t.expiresAt)}</td>
-                    <td className="small ink-2">{t.createdBy ?? '—'}</td>
-                    <td className="right">
+                    <td className="s-meta">{expired ? <Badge>Wygasł</Badge> : used ? <Badge>Wykorzystany</Badge> : <Badge variant="success">Aktywny</Badge>}</td>
+                    <td className="s-meta" data-label="Użyć:">{t.usesLeft ?? '∞'}</td>
+                    <td className="small ink-2 s-meta" data-label="Wygasa:">{dateTime(t.expiresAt)}</td>
+                    <td className="small ink-2 s-meta" data-label="Autor:">{t.createdBy ?? '—'}</td>
+                    <td className="right s-end">
                       <Button size="sm" variant="ghost" icon={Trash2} onClick={() => remove(t)} title="Usuń token" />
                     </td>
                   </tr>

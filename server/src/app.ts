@@ -23,6 +23,9 @@ import { updateRoutes } from './routes/updates.ts';
 import { desktopRoutes } from './routes/desktop.ts';
 import { UpdateStore } from './updates.ts';
 import { MetricsStore, RETENTION_MS } from './metrics.ts';
+import { AlertEngine } from './alerts.ts';
+import { Notifier } from './notify.ts';
+import { alertRoutes } from './routes/alerts.ts';
 import { loadOrCreateKey } from './crypto.ts';
 
 const CSP = [
@@ -45,13 +48,20 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
 
   const metrics = new MetricsStore(db);
   const hub = new Hub(db, metrics);
+  const secretKey = loadOrCreateKey(config.keyFile);
+  const notifier = new Notifier(db, secretKey, (msg) => app.log.warn(msg));
+  const alerts = new AlertEngine(db, hub, notifier);
+  hub.listeners.metrics = (id, m) => alerts.onMetrics(id, m);
+  hub.listeners.connected = (id) => alerts.onConnected(id);
   const ctx: Ctx = {
     config,
     db,
     hub,
-    secretKey: loadOrCreateKey(config.keyFile),
+    secretKey,
     updates: new UpdateStore(db, config.updatesDir, config.releasePublicKey),
     metrics,
+    alerts,
+    notifier,
     limits: {
       login: new RateLimiter(10, 15 * 60 * 1000), // 10 prób / 15 min / IP
       enroll: new RateLimiter(20, 15 * 60 * 1000),
@@ -87,6 +97,8 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
   app.addHook('onClose', async () => {
     clearInterval(poll);
     clearInterval(metricsPrune);
+    alerts.close();
+    notifier.close();
     hub.close();
     ctx.limits.login.close();
     ctx.limits.enroll.close();
@@ -115,6 +127,7 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
   await wsRoutes(app, ctx);
   await terminalRoutes(app, ctx);
   await desktopRoutes(app, ctx);
+  await alertRoutes(app, ctx);
 
   if (config.panelDir && existsSync(config.panelDir)) {
     // bez wildcard:false — pliki są serwowane dynamicznie, więc przebudowa panelu nie wymaga restartu

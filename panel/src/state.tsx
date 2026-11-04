@@ -1,5 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
-import { api, type Client, type Me, type Permission, type Tag } from './api.ts';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { api, type AlertItem, type Client, type Me, type Permission, type Tag } from './api.ts';
 
 // ---------- zalogowane konto ----------
 
@@ -63,4 +63,72 @@ export function useOrg(): OrgState {
 /** Powiadamia wszystkie widoki, że zmienili się klienci/tagi. */
 export function orgChanged(): void {
   window.dispatchEvent(new Event('overvnc:org-changed'));
+}
+
+// ---------- alerty (otwarte — licznik w menu, znaczniki na liście komputerów) ----------
+
+interface AlertsState {
+  open: AlertItem[];
+  /** otwarte i niepotwierdzone */
+  unacked: number;
+  byAgent: Map<string, AlertItem[]>;
+  /** rośnie przy każdej zmianie alertów — widoki historii pobierają ją wtedy ponownie */
+  version: number;
+  reload: () => Promise<void>;
+}
+
+const AlertsContext = createContext<AlertsState | null>(null);
+
+/** Zdarzenie alertu z WebSocketu panelu (App przekazuje je przez window). */
+export interface AlertEvent {
+  type: 'alert_opened' | 'alert_resolved' | 'alert_updated';
+  data: AlertItem;
+}
+
+export function alertEvent(e: AlertEvent): void {
+  window.dispatchEvent(new CustomEvent<AlertEvent>('overvnc:alert', { detail: e }));
+}
+
+export function AlertsProvider({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState<AlertItem[]>([]);
+  const [version, setVersion] = useState(0);
+
+  const reload = useCallback(async () => {
+    const list = await api.alerts('open').catch(() => null);
+    if (list) setOpen(list);
+    setVersion((v) => v + 1);
+  }, []);
+
+  useEffect(() => {
+    void reload();
+    const onAlert = (ev: Event) => {
+      const { type, data } = (ev as CustomEvent<AlertEvent>).detail;
+      if (!data) return;
+      setOpen((prev) => {
+        const rest = prev.filter((a) => a.id !== data.id);
+        return type === 'alert_resolved' || data.resolvedAt ? rest : [data, ...rest].sort((a, b) => b.startedAt - a.startedAt);
+      });
+      setVersion((v) => v + 1);
+    };
+    const onReload = () => void reload();
+    window.addEventListener('overvnc:alert', onAlert);
+    window.addEventListener('overvnc:alerts-reload', onReload);
+    return () => {
+      window.removeEventListener('overvnc:alert', onAlert);
+      window.removeEventListener('overvnc:alerts-reload', onReload);
+    };
+  }, [reload]);
+
+  const value = useMemo(() => {
+    const byAgent = new Map<string, AlertItem[]>();
+    for (const a of open) byAgent.set(a.agentId, [...(byAgent.get(a.agentId) ?? []), a]);
+    return { open, unacked: open.filter((a) => !a.ackAt).length, byAgent, version, reload };
+  }, [open, version, reload]);
+  return <AlertsContext.Provider value={value}>{children}</AlertsContext.Provider>;
+}
+
+export function useAlerts(): AlertsState {
+  const ctx = useContext(AlertsContext);
+  if (!ctx) throw new Error('useAlerts poza AlertsProvider');
+  return ctx;
 }

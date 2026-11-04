@@ -26,9 +26,11 @@ import {
   Upload,
   X,
   type LucideIcon,
+  FolderOpen,
+  MoreHorizontal,
 } from 'lucide-react';
 import { api, errorMessage, type Agent, type DirListing, type FileEntry, type FsRoot } from '../../api.ts';
-import { Button, Checkbox, EmptyState, Field, Modal, toast } from '../../components.tsx';
+import { Button, Checkbox, Dropdown, EmptyState, Field, Modal, toast } from '../../components.tsx';
 import { bytes, dateTime, plural } from '../../format.ts';
 import { useUploads } from './useUploads.ts';
 import { TextEditorModal } from './TextEditorModal.tsx';
@@ -330,8 +332,13 @@ export function FilesView({ agent, initialPath }: { agent: Agent; initialPath: s
               <Upload /> Upuść, aby wysłać do <span className="mono">{listing?.path}</span>
             </div>
           )}
+          {rows.length > 0 && (
+            <label className="only-mobile mobile-selectall">
+              <Checkbox label="Zaznacz wszystkie" checked={allSel} indeterminate={sel.length > 0 && !allSel} onChange={(v) => setSelected(v ? new Set(rows.map((r) => r.path)) : new Set())} /> Zaznacz wszystkie ({rows.length})
+            </label>
+          )}
           <div className="table-scroll scroll" style={{ maxHeight: 'calc(100vh - 360px)', minHeight: 320 }}>
-            <table className="table hover compact-rows">
+            <table className="table hover compact-rows stack">
               <thead className="sticky">
                 <tr>
                   <th className="cb-cell">
@@ -351,16 +358,29 @@ export function FilesView({ agent, initialPath }: { agent: Agent; initialPath: s
                       <td className="cb-cell">
                         <Checkbox label={`Zaznacz ${e.name}`} checked={selected.has(e.path)} onChange={(v) => toggle(e.path, v)} />
                       </td>
-                      <td style={{ maxWidth: 520 }}>
+                      <td className="s-main" style={{ maxWidth: 520 }}>
                         <button className={`file-name ${e.type === 'dir' ? 'dir' : ''} ${e.hidden ? 'hidden-file' : ''}`} onClick={() => open(e)} title={e.path}>
                           <Icon />
                           <span className="ellipsis">{e.name}</span>
                         </button>
                       </td>
-                      <td className="right mono">{e.type === 'dir' ? '—' : bytes(e.size)}</td>
-                      <td className="small ink-2 nowrap">{dateTime(e.modified)}</td>
-                      <td>
-                        <div className="menu-actions row-actions">
+                      <td className={`right mono ${e.type === 'dir' ? 's-hide' : 's-meta'}`}>{e.type === 'dir' ? '—' : bytes(e.size)}</td>
+                      <td className="small ink-2 nowrap s-meta">{dateTime(e.modified)}</td>
+                      <td className="s-end">
+                        <span className="only-mobile">
+                          <Dropdown
+                            icon={MoreHorizontal}
+                            title={`Akcje: ${e.name}`}
+                            items={[
+                              ...(e.type === 'dir' ? [{ key: 'open', label: 'Otwórz folder', icon: FolderOpen, onClick: () => open(e) }] : []),
+                              ...(e.type === 'file' && TEXT_EXT.test(e.name) ? [{ key: 'edit', label: 'Podgląd / edycja', icon: FileText, onClick: () => setEditor(e.path) }] : []),
+                              { key: 'dl', label: e.type === 'dir' ? 'Pobierz jako ZIP' : 'Pobierz', icon: Download, onClick: () => download(e) },
+                              { key: 'ren', label: 'Zmień nazwę', icon: Pencil, onClick: () => setDialog({ kind: 'rename', entry: e }) },
+                              { key: 'del', label: 'Usuń', icon: Trash2, danger: true, onClick: () => setDialog({ kind: 'delete', entries: [e] }) },
+                            ]}
+                          />
+                        </span>
+                        <div className="menu-actions row-actions only-desktop">
                           {e.type === 'file' && TEXT_EXT.test(e.name) && <Button size="sm" variant="ghost" icon={FileText} title="Podgląd / edycja" onClick={() => setEditor(e.path)} />}
                           <Button size="sm" variant="ghost" icon={Download} title={e.type === 'dir' ? 'Pobierz jako ZIP' : 'Pobierz'} onClick={() => download(e)} />
                           <Button size="sm" variant="ghost" icon={Pencil} title="Zmień nazwę" onClick={() => setDialog({ kind: 'rename', entry: e })} />
@@ -373,7 +393,7 @@ export function FilesView({ agent, initialPath }: { agent: Agent; initialPath: s
                 {listing && rows.length === 0 && (
                   <tr>
                     <td colSpan={5} className="center-text">
-                      {q ? 'Brak pasujących elementów.' : 'Pusty folder — przeciągnij tu pliki, aby je wysłać.'}
+                      {q ? 'Brak pasujących elementów.' : 'Pusty folder — przeciągnij tu pliki albo użyj „Wyślij pliki”.'}
                     </td>
                   </tr>
                 )}

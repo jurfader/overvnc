@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Eye, Lock, Maximize2, Minimize2, MonitorSmartphone, MousePointer2, Plug, RotateCcw, ShieldAlert } from 'lucide-react';
+import { Eye, Keyboard, Lock, Maximize2, Minimize2, MonitorSmartphone, MousePointer2, Plug, RotateCcw, ShieldAlert, ZoomOut } from 'lucide-react';
 import type { Agent } from '../../api.ts';
 import { Badge, Button, EmptyState } from '../../components.tsx';
 import { bytes } from '../../format.ts';
+import { keyForChar } from './keytext.ts';
 
 type Quality = 'low' | 'medium' | 'high';
 type State = 'connecting' | 'consent' | 'ready' | 'closed';
@@ -21,6 +22,49 @@ interface DesktopInfo {
 }
 
 const QUALITY_LABELS: Record<Quality, string> = { low: 'Niska (szybka)', medium: 'Średnia', high: 'Wysoka' };
+
+interface Zoom {
+  s: number;
+  x: number;
+  y: number;
+}
+const NO_ZOOM: Zoom = { s: 1, x: 0, y: 0 };
+interface Mods {
+  ctrl: boolean;
+  alt: boolean;
+  shift: boolean;
+  meta: boolean;
+}
+const NO_MODS: Mods = { ctrl: false, alt: false, shift: false, meta: false };
+const MAX_ZOOM = 4;
+const LONG_PRESS_MS = 500;
+const DRAG_START_PX = 10;
+const SCROLL_STEP_PX = 40;
+const SENTINEL = '\u00a0\u00a0';
+
+/** Pasek klawiszy dla ekranów dotykowych. */
+const DESK_KEYS: { label: string; code?: string; wheel?: number; title?: string }[] = [
+  { label: 'Esc', code: 'Escape' },
+  { label: 'Tab', code: 'Tab' },
+  { label: 'Del', code: 'Delete' },
+  { label: '↑', code: 'ArrowUp' },
+  { label: '↓', code: 'ArrowDown' },
+  { label: '←', code: 'ArrowLeft' },
+  { label: '→', code: 'ArrowRight' },
+  { label: 'Home', code: 'Home' },
+  { label: 'End', code: 'End' },
+  { label: 'PgUp', code: 'PageUp' },
+  { label: 'PgDn', code: 'PageDown' },
+  { label: 'F5', code: 'F5' },
+  { label: '⇡ przewiń', wheel: -360, title: 'Przewiń w górę' },
+  { label: '⇣ przewiń', wheel: 360, title: 'Przewiń w dół' },
+];
+const MOD_KEYS: { key: keyof Mods; label: string }[] = [
+  { key: 'ctrl', label: 'Ctrl' },
+  { key: 'alt', label: 'Alt' },
+  { key: 'shift', label: 'Shift' },
+  { key: 'meta', label: 'Win' },
+];
 
 /** Klatka: seq u32, szer u16, wys u16, n u16, potem kafelki: x,y,w,h (u16), długość u32, JPEG. */
 function parseFrame(buf: ArrayBuffer) {
@@ -123,10 +167,27 @@ export function DesktopView({ agent }: { agent: Agent }) {
     // jakość i monitor zmieniamy w locie (cfg); nowe połączenie tylko przy zmianie trybu podglądu / „Połącz ponownie”
   }, [agent.id, supported, viewOnly, session]);
 
-  // ---------- mysz i klawiatura ----------
+  // telefon: widok od razu na całym ekranie (nagłówek strony i zakładki zostają powyżej)
+  useEffect(() => {
+    if (window.matchMedia('(max-width: 720px)').matches) wrap.current?.scrollIntoView({ block: 'start' });
+  }, []);
+
+  // ---------- mysz, dotyk i klawiatura ----------
   const pressedKeys = useRef(new Set<string>());
   const pressedButtons = useRef(new Set<number>());
   const pendingMove = useRef<{ x: number; y: number } | null>(null);
+  const stage = useRef<HTMLDivElement>(null);
+  const keyInput = useRef<HTMLInputElement>(null);
+  const composing = useRef(false);
+  const [zoom, setZoom] = useState<Zoom>(NO_ZOOM);
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const [mods, setMods] = useState<Mods>(NO_MODS);
+  const modsRef = useRef(mods);
+  modsRef.current = mods;
+  const viewOnlyRef = useRef(viewOnly);
+  viewOnlyRef.current = viewOnly;
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
 
   const pos = (e: { clientX: number; clientY: number }) => {
     const r = canvas.current!.getBoundingClientRect();
@@ -140,20 +201,66 @@ export function DesktopView({ agent }: { agent: Agent }) {
     pressedButtons.current.clear();
   }, []);
 
+  /** Pojedyncze naciśnięcie klawisza; modyfikatory z paska (Ctrl/Alt/Shift/Win) działają na jedno naciśnięcie. */
+  const tapKey = useCallback((code: string, extra: string[] = []) => {
+    if (viewOnlyRef.current) return;
+    const m = modsRef.current;
+    const held = [...new Set([...(m.ctrl ? ['ControlLeft'] : []), ...(m.alt ? ['AltLeft'] : []), ...(m.shift ? ['ShiftLeft'] : []), ...(m.meta ? ['MetaLeft'] : []), ...extra])];
+    for (const h of held) send({ t: 'k', code: h, d: true });
+    send({ t: 'k', code, d: true });
+    send({ t: 'k', code, d: false });
+    for (const h of [...held].reverse()) send({ t: 'k', code: h, d: false });
+    if (m.ctrl || m.alt || m.shift || m.meta) setMods(NO_MODS);
+  }, []);
+
+  /** Tekst z klawiatury ekranowej -> naciśnięcia klawiszy. */
+  const typeText = useCallback(
+    (text: string) => {
+      for (const ch of text) {
+        const k = keyForChar(ch);
+        if (k) tapKey(k.code, [...(k.shift ? ['ShiftLeft'] : []), ...(k.altGr ? ['AltRight'] : [])]);
+      }
+    },
+    [tapKey],
+  );
+
+  /** Powiększenie mieści się w obszarze ekranu (bez pustych pasów przy krawędziach). */
+  const clampZoom = (z: Zoom): Zoom => {
+    const st = stage.current;
+    if (!st || z.s <= 1.001) return NO_ZOOM;
+    const s = Math.min(MAX_ZOOM, z.s);
+    return { s, x: Math.min(0, Math.max(st.clientWidth * (1 - s), z.x)), y: Math.min(0, Math.max(st.clientHeight * (1 - s), z.y)) };
+  };
+
+  useEffect(() => setZoom(NO_ZOOM), [info?.current, session]);
+
   useEffect(() => {
     const c = canvas.current;
-    if (!c || state !== 'ready' || viewOnly) return;
+    const st = stage.current;
+    if (!c || !st || state !== 'ready') return;
     let raf = 0;
     const flushMove = () => {
       raf = 0;
       if (pendingMove.current) send({ t: 'm', ...pendingMove.current });
       pendingMove.current = null;
     };
-    const onMove = (e: PointerEvent) => {
-      pendingMove.current = pos(e); // ruch zbierany do jednej wiadomości na klatkę ekranu
+    const queueMove = (p: { x: number; y: number }) => {
+      pendingMove.current = p; // ruch zbierany do jednej wiadomości na klatkę ekranu
       if (!raf) raf = requestAnimationFrame(flushMove);
     };
+    const click = (p: { x: number; y: number }, b: number) => {
+      send({ t: 'm', ...p });
+      send({ t: 'b', ...p, b, d: true });
+      send({ t: 'b', ...p, b, d: false });
+    };
+
+    // --- mysz i pióro: bez zmian względem komputera ---
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType === 'touch' || viewOnlyRef.current) return;
+      queueMove(pos(e));
+    };
     const onDown = (e: PointerEvent) => {
+      if (e.pointerType === 'touch' || viewOnlyRef.current) return;
       e.preventDefault();
       c.focus();
       c.setPointerCapture(e.pointerId);
@@ -162,22 +269,141 @@ export function DesktopView({ agent }: { agent: Agent }) {
       send({ t: 'b', ...pos(e), b, d: true });
     };
     const onUp = (e: PointerEvent) => {
+      if (e.pointerType === 'touch' || viewOnlyRef.current) return;
       const b = e.button === 1 ? 1 : e.button === 2 ? 2 : 0;
       pressedButtons.current.delete(b);
       send({ t: 'b', ...pos(e), b, d: false });
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      if (viewOnlyRef.current) return;
       const lines = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY;
       if (lines) send({ t: 'w', dy: Math.max(-2400, Math.min(2400, Math.sign(lines) * Math.max(120, Math.round(Math.abs(lines) / 100) * 120))) });
     };
     const onKey = (d: boolean) => (e: KeyboardEvent) => {
       e.preventDefault(); // skróty trafiają do zdalnego komputera, nie do przeglądarki
-      if (!e.code) return;
+      if (!e.code || viewOnlyRef.current) return;
       if (d) pressedKeys.current.add(e.code);
       else pressedKeys.current.delete(e.code);
       send({ t: 'k', code: e.code, d });
     };
+
+    // --- dotyk: stuknięcie = klik, przytrzymanie = prawy klik, przeciąganie = przeciąganie myszą,
+    //     dwa palce = przewijanie (albo przesuwanie widoku po powiększeniu), rozsunięcie palców = powiększenie ---
+    const touches = new Map<number, { x: number; y: number }>();
+    let tap: { id: number; sx: number; sy: number; timer: number; dragging: boolean; done: boolean; last: { x: number; y: number } } | null = null;
+    let gesture: { mode: 'pending' | 'pinch' | 'pan' | 'scroll'; d0: number; c0: { x: number; y: number }; last: { x: number; y: number }; z0: Zoom; acc: number } | null = null;
+    const local = (e: PointerEvent) => {
+      const r = st.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
+    };
+    const pair = () => {
+      const [a, b] = [...touches.values()];
+      return { d: Math.hypot(a.x - b.x, a.y - b.y), c: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
+    };
+    const endDrag = (p: { x: number; y: number }) => {
+      if (raf) {
+        cancelAnimationFrame(raf);
+        flushMove();
+      }
+      send({ t: 'b', ...p, b: 0, d: false });
+      pressedButtons.current.delete(0);
+    };
+
+    const onTouchDown = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch') return;
+      e.preventDefault();
+      st.setPointerCapture(e.pointerId);
+      touches.set(e.pointerId, local(e));
+      if (touches.size === 1) {
+        const start = { clientX: e.clientX, clientY: e.clientY };
+        tap = {
+          id: e.pointerId,
+          sx: e.clientX,
+          sy: e.clientY,
+          dragging: false,
+          done: false,
+          last: pos(start),
+          timer: window.setTimeout(() => {
+            if (!tap || tap.dragging || touches.size !== 1 || viewOnlyRef.current) return;
+            tap.done = true;
+            click(pos(start), 2); // przytrzymanie = prawy przycisk
+            navigator.vibrate?.(15);
+          }, LONG_PRESS_MS),
+        };
+      } else if (touches.size === 2) {
+        // drugi palec przerywa stuknięcie/przeciąganie — zaczyna się gest dwoma palcami
+        if (tap) {
+          window.clearTimeout(tap.timer);
+          if (tap.dragging) endDrag(tap.last);
+          tap = null;
+        }
+        const { d, c: center } = pair();
+        gesture = { mode: 'pending', d0: d, c0: center, last: center, z0: zoomRef.current, acc: 0 };
+      }
+    };
+    const onTouchMove = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch' || !touches.has(e.pointerId)) return;
+      e.preventDefault();
+      touches.set(e.pointerId, local(e));
+      if (touches.size === 1 && tap && tap.id === e.pointerId && !tap.done) {
+        if (!tap.dragging && Math.hypot(e.clientX - tap.sx, e.clientY - tap.sy) > DRAG_START_PX) {
+          window.clearTimeout(tap.timer);
+          if (viewOnlyRef.current) {
+            tap.done = true;
+            return;
+          }
+          tap.dragging = true;
+          const p0 = pos({ clientX: tap.sx, clientY: tap.sy });
+          send({ t: 'm', ...p0 });
+          send({ t: 'b', ...p0, b: 0, d: true });
+          pressedButtons.current.add(0);
+        }
+        if (tap.dragging) {
+          tap.last = pos(e);
+          queueMove(tap.last);
+        }
+        return;
+      }
+      if (touches.size !== 2 || !gesture) return;
+      const { d, c: center } = pair();
+      if (gesture.mode === 'pending') {
+        const scaleChange = Math.abs(d - gesture.d0) / Math.max(1, gesture.d0);
+        const shift = Math.hypot(center.x - gesture.c0.x, center.y - gesture.c0.y);
+        if (scaleChange > 0.08) gesture.mode = 'pinch';
+        else if (shift > 12) gesture.mode = zoomRef.current.s > 1.001 ? 'pan' : 'scroll';
+        else return;
+      }
+      if (gesture.mode === 'scroll') {
+        // palce w górę = treść w dół (jak przy przewijaniu strony na telefonie)
+        gesture.acc += gesture.last.y - center.y;
+        gesture.last = center;
+        while (Math.abs(gesture.acc) >= SCROLL_STEP_PX) {
+          const dir = Math.sign(gesture.acc);
+          gesture.acc -= dir * SCROLL_STEP_PX;
+          if (!viewOnlyRef.current) send({ t: 'w', dy: dir * 120 });
+        }
+        return;
+      }
+      const z0 = gesture.z0;
+      const s = gesture.mode === 'pinch' ? Math.min(MAX_ZOOM, Math.max(1, (z0.s * d) / Math.max(1, gesture.d0))) : z0.s;
+      // punkt obrazu pod środkiem palców zostaje pod palcami
+      const px = (gesture.c0.x - z0.x) / z0.s;
+      const py = (gesture.c0.y - z0.y) / z0.s;
+      setZoom(clampZoom({ s, x: center.x - px * s, y: center.y - py * s }));
+    };
+    const onTouchUp = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch' || !touches.has(e.pointerId)) return;
+      touches.delete(e.pointerId);
+      if (tap && tap.id === e.pointerId) {
+        window.clearTimeout(tap.timer);
+        if (tap.dragging) endDrag(pos(e));
+        else if (!tap.done && e.type === 'pointerup' && !viewOnlyRef.current) click(pos(e), 0);
+        tap = null;
+      }
+      if (touches.size < 2) gesture = null;
+    };
+
     const down = onKey(true);
     const up = onKey(false);
     const noMenu = (e: Event) => e.preventDefault();
@@ -188,9 +414,14 @@ export function DesktopView({ agent }: { agent: Agent }) {
     c.addEventListener('keydown', down);
     c.addEventListener('keyup', up);
     c.addEventListener('blur', releaseAll);
-    c.addEventListener('contextmenu', noMenu);
+    st.addEventListener('contextmenu', noMenu);
+    st.addEventListener('pointerdown', onTouchDown);
+    st.addEventListener('pointermove', onTouchMove);
+    st.addEventListener('pointerup', onTouchUp);
+    st.addEventListener('pointercancel', onTouchUp);
     return () => {
       cancelAnimationFrame(raf);
+      if (tap) window.clearTimeout(tap.timer);
       releaseAll();
       c.removeEventListener('pointermove', onMove);
       c.removeEventListener('pointerdown', onDown);
@@ -199,9 +430,31 @@ export function DesktopView({ agent }: { agent: Agent }) {
       c.removeEventListener('keydown', down);
       c.removeEventListener('keyup', up);
       c.removeEventListener('blur', releaseAll);
-      c.removeEventListener('contextmenu', noMenu);
+      st.removeEventListener('contextmenu', noMenu);
+      st.removeEventListener('pointerdown', onTouchDown);
+      st.removeEventListener('pointermove', onTouchMove);
+      st.removeEventListener('pointerup', onTouchUp);
+      st.removeEventListener('pointercancel', onTouchUp);
     };
-  }, [state, viewOnly, releaseAll]);
+  }, [state, releaseAll]);
+
+  // ---------- klawiatura ekranowa (ukryte pole tekstowe) ----------
+  // pole zawsze zawiera dwa znaki-wartowniki: skrócenie = Backspace (działa też, gdy „nic nie wpisano”)
+  const resetInput = () => {
+    const el = keyInput.current;
+    if (!el) return;
+    el.value = SENTINEL;
+    el.setSelectionRange(SENTINEL.length, SENTINEL.length);
+  };
+  const flushInput = (v: string) => {
+    if (v.length < SENTINEL.length) for (let i = 0; i < SENTINEL.length - v.length; i++) tapKey('Backspace');
+    else typeText(v.startsWith(SENTINEL) ? v.slice(SENTINEL.length) : v.replaceAll('\u00a0', ''));
+    resetInput();
+  };
+  const openKeyboard = () => {
+    resetInput();
+    keyInput.current?.focus(); // w obsłudze dotknięcia — inaczej telefon nie pokaże klawiatury
+  };
 
   // pełny ekran przeglądarki (Esc wychodzi)
   useEffect(() => {
@@ -209,9 +462,13 @@ export function DesktopView({ agent }: { agent: Agent }) {
     document.addEventListener('fullscreenchange', on);
     return () => document.removeEventListener('fullscreenchange', on);
   }, []);
+  // iPhone nie obsługuje trybu pełnoekranowego dla elementów strony — wtedy pełny ekran w obrębie strony
+  const [cssFull, setCssFull] = useState(false);
   const toggleFullscreen = () => {
+    if (cssFull) return setCssFull(false);
     if (document.fullscreenElement) void document.exitFullscreen();
-    else void wrap.current?.requestFullscreen().then(() => canvas.current?.focus());
+    else if (document.fullscreenEnabled && wrap.current?.requestFullscreen) void wrap.current.requestFullscreen().then(() => canvas.current?.focus(), () => setCssFull(true));
+    else setCssFull(true);
   };
 
   if (!agent.online) return <EmptyState icon={Plug} title="Komputer jest offline" text="Pulpit zdalny jest dostępny, gdy komputer jest włączony." />;
@@ -226,7 +483,7 @@ export function DesktopView({ agent }: { agent: Agent }) {
 
   const secure = info?.desktop && info.desktop.toLowerCase() !== 'default';
   return (
-    <div ref={wrap} className={`desktop-wrap glass-card anim-rise ${fullscreen ? 'fullscreen' : ''}`}>
+    <div ref={wrap} className={`desktop-wrap glass-card anim-rise ${fullscreen || cssFull ? 'fullscreen' : ''} ${cssFull ? 'fullscreen-css' : ''}`}>
       <div className="term-bar">
         <div className="term-status">
           <span
@@ -279,14 +536,60 @@ export function DesktopView({ agent }: { agent: Agent }) {
             ))}
           </select>
           <Button size="sm" variant={viewOnly ? 'outline' : 'ghost'} icon={viewOnly ? Eye : MousePointer2} onClick={() => setViewOnly((v) => !v)} title="Przełącz podgląd / sterowanie">
-            {viewOnly ? 'Podgląd' : 'Sterowanie'}
+            <span className="btn-label">{viewOnly ? 'Podgląd' : 'Sterowanie'}</span>
           </Button>
+          {zoom.s > 1 && <Button size="sm" variant="ghost" icon={ZoomOut} title="Pomniejsz (cały ekran)" onClick={() => setZoom(NO_ZOOM)} />}
           <Button size="sm" variant="ghost" icon={RotateCcw} title="Połącz ponownie" onClick={() => setSession((n) => n + 1)} />
-          <Button size="sm" variant="ghost" icon={fullscreen ? Minimize2 : Maximize2} title={fullscreen ? 'Zamknij pełny ekran' : 'Pełny ekran'} onClick={toggleFullscreen} />
+          <Button size="sm" variant="ghost" icon={fullscreen || cssFull ? Minimize2 : Maximize2} title={fullscreen || cssFull ? 'Zamknij pełny ekran' : 'Pełny ekran'} onClick={toggleFullscreen} />
         </div>
       </div>
-      <div className="desktop-stage">
-        <canvas ref={canvas} className={`desktop-canvas ${viewOnly ? 'view-only' : ''}`} tabIndex={0} width={1280} height={720} aria-label="Ekran zdalnego komputera" />
+      <div className="desktop-stage" ref={stage}>
+        <div className="desktop-zoom" style={zoom.s > 1 ? { transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.s})` } : undefined}>
+          <canvas ref={canvas} className={`desktop-canvas ${viewOnly ? 'view-only' : ''}`} tabIndex={0} width={1280} height={720} aria-label="Ekran zdalnego komputera" />
+        </div>
+        {/* klawiatura ekranowa: pole poza widokiem; tekst zamieniany na naciśnięcia klawiszy */}
+        <input
+          ref={keyInput}
+          className="desktop-keyinput"
+          aria-label="Klawiatura zdalnego komputera"
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="none"
+          spellCheck={false}
+          enterKeyHint="send"
+          defaultValue={SENTINEL}
+          onFocus={() => setKeyboardOpen(true)}
+          onBlur={() => setKeyboardOpen(false)}
+          onKeyDown={(e) => {
+            if (viewOnly) return;
+            // klawiatura fizyczna (np. tablet z klawiaturą Bluetooth): prawdziwe klawisze, także skróty
+            if (e.nativeEvent.keyCode !== 229 && e.code && e.key !== 'Unidentified') {
+              e.preventDefault();
+              if (!pressedKeys.current.has(e.code)) {
+                pressedKeys.current.add(e.code);
+                send({ t: 'k', code: e.code, d: true });
+              }
+              return;
+            }
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              tapKey('Enter');
+            }
+          }}
+          onKeyUp={(e) => {
+            if (pressedKeys.current.has(e.code)) {
+              e.preventDefault();
+              pressedKeys.current.delete(e.code);
+              send({ t: 'k', code: e.code, d: false });
+            }
+          }}
+          onInput={(e) => !composing.current && flushInput(e.currentTarget.value)}
+          onCompositionStart={() => (composing.current = true)}
+          onCompositionEnd={(e) => {
+            composing.current = false;
+            flushInput(e.currentTarget.value);
+          }}
+        />
         {state !== 'ready' && (
           <div className="desktop-overlay">
             {state === 'closed' ? (
@@ -306,8 +609,41 @@ export function DesktopView({ agent }: { agent: Agent }) {
           </div>
         )}
       </div>
+      {state === 'ready' && !viewOnly && (
+        <div className="term-keys desk-keys" role="toolbar" aria-label="Klawisze specjalne">
+          <button type="button" className={`term-key wide ${keyboardOpen ? 'on' : ''}`} onClick={() => (keyboardOpen ? keyInput.current?.blur() : openKeyboard())}>
+            <Keyboard size={15} /> Klawiatura
+          </button>
+          {MOD_KEYS.map((m) => (
+            <button
+              key={m.key}
+              type="button"
+              className={`term-key mod ${mods[m.key] ? 'on' : ''}`}
+              aria-pressed={mods[m.key]}
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={() => setMods((cur) => ({ ...cur, [m.key]: !cur[m.key] }))}
+            >
+              {m.label}
+            </button>
+          ))}
+          {DESK_KEYS.map((k) => (
+            <button
+              key={k.label}
+              type="button"
+              className="term-key"
+              title={k.title}
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={() => (k.wheel ? send({ t: 'w', dy: k.wheel }) : k.code && tapKey(k.code))}
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="term-foot small muted">
-        Kliknij obraz, aby sterować klawiaturą (skróty klawiszowe trafiają do zdalnego komputera). Sesja jest zapisywana w dzienniku zdarzeń.
+        <span className="mouse-only">Kliknij obraz, aby sterować klawiaturą (skróty klawiszowe trafiają do zdalnego komputera). </span>
+        <span className="touch-only">Dotknij — klik · przytrzymaj — prawy klik · przeciągnij — przeciąganie · dwa palce — przewijanie · rozsuń palce — powiększenie. </span>
+        Sesja jest zapisywana w dzienniku zdarzeń.
       </div>
     </div>
   );

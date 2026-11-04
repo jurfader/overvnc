@@ -101,7 +101,7 @@ export function Audit() {
       </header>
       <div className="glass-card table-card anim-rise" style={{ animationDelay: '40ms' }}>
         <div className="table-scroll">
-          <table className="table hover">
+          <table className="table hover stack">
             <thead>
               <tr>
                 <th>Czas</th>
@@ -117,14 +117,14 @@ export function Audit() {
                 const [label, tone] = ACTIONS[r.action] ?? [r.action, 'neutral'];
                 return (
                   <tr key={r.id} className={tone === 'danger' ? 'row-warn' : ''}>
-                    <td className="small nowrap ink-2">{dateTime(r.ts)}</td>
-                    <td className="mono">{r.actor.startsWith('agent:') ? `agent:${r.actor.slice(6, 14)}…` : r.actor}</td>
-                    <td>
+                    <td className="small nowrap ink-2 s-end">{dateTime(r.ts)}</td>
+                    <td className="mono s-meta">{r.actor.startsWith('agent:') ? `agent:${r.actor.slice(6, 14)}…` : r.actor}</td>
+                    <td className="s-main">
                       <Badge variant={tone}>{label}</Badge>
                     </td>
-                    <td className="mono">{r.target ? (r.target.length > 12 ? r.target.slice(0, 8) + '…' : r.target) : ''}</td>
-                    <td className="mono muted">{r.details}</td>
-                    <td className="mono">{r.ip}</td>
+                    <td className="mono s-meta" data-label="cel:">{r.target ? (r.target.length > 12 ? r.target.slice(0, 8) + '…' : r.target) : ''}</td>
+                    <td className="mono muted s-full audit-details">{r.details}</td>
+                    <td className="mono s-meta" data-label="IP:">{r.ip}</td>
                   </tr>
                 );
               })}

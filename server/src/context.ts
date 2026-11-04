@@ -5,6 +5,8 @@ import type { RateLimiter } from './ratelimit.ts';
 import type { Role } from './permissions.ts';
 import type { UpdateStore } from './updates.ts';
 import type { MetricsStore } from './metrics.ts';
+import type { AlertEngine } from './alerts.ts';
+import type { Notifier } from './notify.ts';
 
 /** Zależności współdzielone przez wszystkie moduły tras. */
 export interface Ctx {
@@ -17,6 +19,10 @@ export interface Ctx {
   updates: UpdateStore;
   /** Historia metryk komputerów (wykresy monitoringu). */
   metrics: MetricsStore;
+  /** Silnik alertów (reguły, otwarte alerty). */
+  alerts: AlertEngine;
+  /** Powiadomienia push (Pushover). */
+  notifier: Notifier;
   /** Wysyła „sprawdź aktualizację” do nieaktualnych komputerów (ustawiane przez trasy aktualizacji). */
   rollout?: (ids?: string[]) => number;
   limits: {

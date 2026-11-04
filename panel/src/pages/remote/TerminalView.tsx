@@ -9,6 +9,33 @@ import { Badge, Button, EmptyState } from '../../components.tsx';
 
 type State = 'connecting' | 'ready' | 'closed';
 
+/** Klawisze specjalne dla ekranów dotykowych (klawiatura telefonu ich nie ma). */
+const EXTRA_KEYS: { label: string; seq: string; ctrlSeq?: string; title?: string }[] = [
+  { label: 'Esc', seq: '\x1b' },
+  { label: 'Tab', seq: '\t' },
+  { label: '↑', seq: '\x1b[A', ctrlSeq: '\x1b[1;5A', title: 'Strzałka w górę (poprzednie polecenie)' },
+  { label: '↓', seq: '\x1b[B', ctrlSeq: '\x1b[1;5B', title: 'Strzałka w dół' },
+  { label: '←', seq: '\x1b[D', ctrlSeq: '\x1b[1;5D', title: 'Strzałka w lewo' },
+  { label: '→', seq: '\x1b[C', ctrlSeq: '\x1b[1;5C', title: 'Strzałka w prawo' },
+  { label: 'Home', seq: '\x1b[H' },
+  { label: 'End', seq: '\x1b[F' },
+  { label: 'PgUp', seq: '\x1b[5~' },
+  { label: 'PgDn', seq: '\x1b[6~' },
+  { label: '|', seq: '|' },
+  { label: '~', seq: '~' },
+  { label: '/', seq: '/' },
+  { label: '-', seq: '-' },
+  { label: ':', seq: ':' },
+];
+
+/** Ctrl+znak -> kod sterujący (Ctrl+C = 0x03 itd.). */
+function ctrlChar(ch: string): string | null {
+  const c = ch.toUpperCase();
+  if (c >= 'A' && c <= 'Z') return String.fromCharCode(c.charCodeAt(0) - 64);
+  const map: Record<string, string> = { ' ': '\x00', '@': '\x00', '[': '\x1b', '\\': '\x1c', ']': '\x1d', '^': '\x1e', _: '\x1f', '?': '\x7f' };
+  return map[ch] ?? null;
+}
+
 const SHELL_LABELS: Record<string, string> = { powershell: 'PowerShell', pwsh: 'PowerShell 7', cmd: 'Wiersz polecenia', bash: 'bash', zsh: 'zsh', sh: 'sh' };
 
 /** Kolory xterm zgodne z motywem OVERVNC (ciemny terminal także w jasnym motywie — tak czyta się go najlepiej). */
@@ -44,6 +71,12 @@ export function TerminalView({ agent }: { agent: Agent }) {
   const [session, setSession] = useState(0); // zmiana = nowa sesja
   const [fullscreen, setFullscreen] = useState(false);
   const [activeShell, setActiveShell] = useState('');
+  // modyfikatory „przyklejane” z paska klawiszy — działają na następny wpisany znak
+  const [mods, setMods] = useState({ ctrl: false, alt: false });
+  const modsRef = useRef(mods);
+  modsRef.current = mods;
+  const sendRef = useRef<(data: string) => void>(() => {});
+  const termRef = useRef<Terminal | null>(null);
 
   const supported = agent.online && agent.capabilities.includes('term.open');
   // "NT AUTHORITY\\SYSTEM" -> "SYSTEM"
@@ -55,7 +88,7 @@ export function TerminalView({ agent }: { agent: Agent }) {
     let disposed = false;
     const term = new Terminal({
       fontFamily: '"JetBrains Mono Variable", ui-monospace, Menlo, Consolas, monospace',
-      fontSize: 13.5,
+      fontSize: window.innerWidth < 720 ? 12 : 13.5,
       lineHeight: 1.15,
       cursorBlink: true,
       scrollback: 10_000,
@@ -67,6 +100,10 @@ export function TerminalView({ agent }: { agent: Agent }) {
     term.loadAddon(new WebLinksAddon());
     const enc = new TextEncoder();
     let ws: WebSocket | null = null;
+    termRef.current = term;
+    sendRef.current = (d: string) => {
+      if (ws?.readyState === WebSocket.OPEN) ws.send(enc.encode(d));
+    };
     let resizeTimer: number | undefined;
     let wasReady = false;
     let gotReason = false;
@@ -122,6 +159,14 @@ export function TerminalView({ agent }: { agent: Agent }) {
         else if (!gotReason) term.writeln('\r\n\x1b[38;5;245m— Połączenie przerwane.\x1b[0m');
       };
       term.onData((d) => {
+        const m = modsRef.current;
+        if ((m.ctrl || m.alt) && d.length === 1) {
+          let out = d;
+          if (m.ctrl) out = ctrlChar(d) ?? d;
+          if (m.alt) out = '\x1b' + out;
+          setMods({ ctrl: false, alt: false });
+          d = out;
+        }
         if (ws?.readyState === WebSocket.OPEN) ws.send(enc.encode(d));
       });
     });
@@ -131,9 +176,16 @@ export function TerminalView({ agent }: { agent: Agent }) {
       ro.disconnect();
       window.clearTimeout(resizeTimer);
       ws?.close();
+      termRef.current = null;
+      sendRef.current = () => {};
       term.dispose();
     };
   }, [agent.id, supported, shell, session]);
+
+  // telefon: widok od razu na całym ekranie (nagłówek strony i zakładki zostają powyżej)
+  useEffect(() => {
+    if (window.matchMedia('(max-width: 720px)').matches) wrap.current?.scrollIntoView({ block: 'start' });
+  }, []);
 
   // pełny ekran: Esc wychodzi (xterm przechwytuje Esc, więc tylko gdy terminal nie ma fokusu — dlatego też przycisk)
   const toggleFullscreen = useCallback(() => setFullscreen((f) => !f), []);
@@ -170,6 +222,55 @@ export function TerminalView({ agent }: { agent: Agent }) {
         </div>
       </div>
       <div className="term-host" ref={host} />
+      {/* pasek klawiszy specjalnych (telefon/tablet); onPointerDown bez fokusu — klawiatura ekranowa zostaje otwarta */}
+      <div className="term-keys" role="toolbar" aria-label="Klawisze specjalne">
+        {(['ctrl', 'alt'] as const).map((k) => (
+          <button
+            key={k}
+            type="button"
+            className={`term-key mod ${mods[k] ? 'on' : ''}`}
+            aria-pressed={mods[k]}
+            onPointerDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setMods((m) => ({ ...m, [k]: !m[k] }));
+              termRef.current?.focus();
+            }}
+          >
+            {k === 'ctrl' ? 'Ctrl' : 'Alt'}
+          </button>
+        ))}
+        <button
+          type="button"
+          className="term-key"
+          title="Przerwij (Ctrl+C)"
+          onPointerDown={(e) => e.preventDefault()}
+          onClick={() => {
+            sendRef.current('\x03');
+            termRef.current?.focus();
+          }}
+        >
+          ^C
+        </button>
+        {EXTRA_KEYS.map((k) => (
+          <button
+            key={k.label}
+            type="button"
+            className="term-key"
+            title={k.title}
+            onPointerDown={(e) => e.preventDefault()}
+            onClick={() => {
+              const m = modsRef.current;
+              let seq = m.ctrl && k.ctrlSeq ? k.ctrlSeq : m.ctrl && k.seq.length === 1 ? (ctrlChar(k.seq) ?? k.seq) : k.seq;
+              if (m.alt) seq = '\x1b' + seq;
+              if (m.ctrl || m.alt) setMods({ ctrl: false, alt: false });
+              sendRef.current(seq);
+              termRef.current?.focus();
+            }}
+          >
+            {k.label}
+          </button>
+        ))}
+      </div>
       <div className="term-foot small muted">
         Terminal działa na koncie {account ? <strong>{account}</strong> : 'agenta'}
         {privileged ? ' (pełne uprawnienia administracyjne)' : ''}. Sesja jest zapisywana w dzienniku zdarzeń i zamyka się po 30 min bezczynności.

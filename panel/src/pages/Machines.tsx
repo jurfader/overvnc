@@ -3,27 +3,20 @@ import { AlertTriangle, Building2, FilterX, Monitor, PlusCircle, Power, Search, 
 import type { Agent } from '../api.ts';
 import { Badge, Button, Checkbox, ClientLabel, EmptyState, Meter, OsBadge, osIcon, StatTile, Status, TagChip } from '../components.tsx';
 import { ago, bytes, platformLabel, plural } from '../format.ts';
-import { useMe, useOrg } from '../state.tsx';
+import { useAlerts, useMe, useOrg } from '../state.tsx';
 import { BulkModal, type BulkMode } from './organize.tsx';
 
 type StatusFilter = 'all' | 'online' | 'offline' | 'alert';
 
-/** Komputer wymaga uwagi, gdy CPU, RAM lub któryś dysk przekracza 90%. */
-function alerts(a: Agent): string[] {
-  const m = a.online ? a.metrics : null;
-  if (!m) return [];
-  const out: string[] = [];
-  if (m.cpuPercent >= 90) out.push('CPU');
-  if (m.memPercent >= 90) out.push('RAM');
-  for (const d of m.disks ?? []) if (d.usedPercent >= 90) out.push(`dysk ${d.mountpoint}`);
-  return out;
-}
 
 const NONE = -1; // filtr „bez klienta”
 
 export function Machines({ agents, initialClient }: { agents: Agent[]; initialClient: number | null }) {
   const { can, me } = useMe();
   const { clients, tags } = useOrg();
+  const { byAgent } = useAlerts();
+  /** Komputer wymaga uwagi, gdy ma otwarte alerty (wg reguł z zakładki Alerty). */
+  const alerts = (a: Agent): string[] => (byAgent.get(a.id) ?? []).map((x) => x.title);
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<StatusFilter>('all');
   const [clientF, setClientF] = useState<number | null>(initialClient);
@@ -56,7 +49,7 @@ export function Machines({ agents, initialClient }: { agents: Agent[]; initialCl
           ),
       )
       .sort((a, b) => Number(b.online) - Number(a.online) || (a.label || a.hostname).localeCompare(b.label || b.hostname, 'pl'));
-  }, [agents, q, status, clientF, siteF, tagF]);
+  }, [agents, q, status, clientF, siteF, tagF, byAgent]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // zaznaczenie obejmuje tylko widoczne wiersze — po zmianie filtrów czyścimy niewidoczne
   useEffect(() => {
@@ -110,7 +103,7 @@ export function Machines({ agents, initialClient }: { agents: Agent[]; initialCl
         <StatTile icon={Monitor} label="Wszystkie komputery" value={agents.length} hint={clients.length ? `u ${clients.length} ${plural(clients.length, 'klienta', 'klientów', 'klientów')}` : 'zarejestrowane w panelu'} />
         <StatTile icon={Wifi} label="Online" value={online} hint={`${agents.length ? Math.round((online / agents.length) * 100) : 0}% floty`} delay={40} />
         <StatTile icon={Power} label="Offline" value={agents.length - online} hint="wyłączone lub bez sieci" delay={80} />
-        <StatTile icon={AlertTriangle} label="Wymagają uwagi" value={alerting} hint="CPU, RAM lub dysk ≥ 90%" delay={120} />
+        <StatTile icon={AlertTriangle} label="Wymagają uwagi" value={alerting} hint="mają otwarte alerty" delay={120} />
       </section>
 
       <div className="filters anim-rise" style={{ animationDelay: '140ms' }}>
@@ -181,8 +174,13 @@ export function Machines({ agents, initialClient }: { agents: Agent[]; initialCl
       )}
 
       <div className="glass-card table-card anim-rise" style={{ animationDelay: '160ms' }}>
+        {manage && rows.length > 0 && (
+          <label className="only-mobile mobile-selectall">
+            <Checkbox label="Zaznacz wszystkie" checked={allSelected} indeterminate={selected.size > 0 && !allSelected} onChange={toggleAll} /> Zaznacz wszystkie ({rows.length})
+          </label>
+        )}
         <div className="table-scroll">
-          <table className="table hover clickable">
+          <table className="table hover clickable stack">
             <thead>
               <tr>
                 {manage && (
@@ -214,7 +212,7 @@ export function Machines({ agents, initialClient }: { agents: Agent[]; initialCl
                         <Checkbox label={`Zaznacz ${a.label || a.hostname}`} checked={isSel} onChange={(v) => toggle(a.id, v)} />
                       </td>
                     )}
-                    <td>
+                    <td className="s-main">
                       <div className="host">
                         <span className={`host-icon ${a.online ? 'on' : ''}`}>
                           <Icon />
@@ -232,35 +230,46 @@ export function Machines({ agents, initialClient }: { agents: Agent[]; initialCl
                         </div>
                       </div>
                     </td>
-                    <td>
+                    <td className="s-full">
                       <ClientLabel name={a.clientName} color={a.clientColor} site={a.siteName} />
                     </td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <td className="s-end">
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'inherit' }}>
                         <Status online={a.online} />
                         {warn.length > 0 && (
-                          <Badge variant="danger">
-                            <AlertTriangle /> {warn.join(', ')}
-                          </Badge>
+                          <span className="only-desktop">
+                            <Badge variant="danger">
+                              <AlertTriangle /> {warn.join(', ')}
+                            </Badge>
+                          </span>
                         )}
                       </div>
                     </td>
-                    <td>
+                    {warn.length > 0 && (
+                      <td className="s-full only-mobile">
+                        <Badge variant="danger">
+                          <AlertTriangle /> {warn.join(', ')}
+                        </Badge>
+                      </td>
+                    )}
+                    <td className="s-hide">
                       <OsBadge os={a.os} />
                       <div className="muted small" style={{ marginTop: 4 }}>
                         {platformLabel(a.os, a.platform)}
                       </div>
                     </td>
-                    <td>
+                    <td className={m ? 's-meta w-bar' : 's-hide'} data-label="CPU">
                       <Meter value={m?.cpuPercent} />
                     </td>
-                    <td>
+                    <td className={m ? 's-meta w-bar' : 's-hide'} data-label="RAM">
                       <Meter value={m?.memPercent} caption={m ? `${bytes(m.memUsed, 0)} / ${bytes(m.memTotal, 0)}` : undefined} />
                     </td>
-                    <td>
+                    <td className={m ? 's-meta w-bar' : 's-hide'} data-label="Dysk">
                       <Meter value={disk?.usedPercent} caption={disk?.mountpoint} />
                     </td>
-                    <td className="small ink-2 nowrap">{a.online ? 'teraz' : ago(a.lastSeen)}</td>
+                    <td className={`small ink-2 nowrap ${a.online ? 's-hide' : 's-meta'}`} data-label="Ostatnio">
+                      {a.online ? 'teraz' : ago(a.lastSeen)}
+                    </td>
                   </tr>
                 );
               })}
