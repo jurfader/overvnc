@@ -3,9 +3,13 @@
 package main
 
 import (
+	"fmt"
 	"image"
 	"math"
+	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -28,6 +32,7 @@ var (
 	procTranslateMessage         = user32.NewProc("TranslateMessage")
 	procDispatchMessageW         = user32.NewProc("DispatchMessageW")
 	procSetWindowDisplayAffinity = user32.NewProc("SetWindowDisplayAffinity")
+	procGetWindowDisplayAffinity = user32.NewProc("GetWindowDisplayAffinity")
 	procGetDpiForMonitor         = windows.NewLazySystemDLL("shcore.dll").NewProc("GetDpiForMonitor")
 	procMonitorFromPoint         = user32.NewProc("MonitorFromPoint")
 	procOpenDesktopW             = user32.NewProc("OpenDesktopW")
@@ -110,8 +115,6 @@ func newLayerWin(screenDC uintptr, x, y, w, h int) *layerWin {
 	if hwnd == 0 {
 		return nil
 	}
-	// operator nie powinien widzieć ramki w podglądzie (Windows 10 2004+; starsze — ramka będzie widoczna)
-	_, _, _ = procSetWindowDisplayAffinity.Call(hwnd, wdaExcludeCapture)
 	dc, _, _ := procCreateCompatibleDC.Call(screenDC)
 	bmi := bitmapInfoHeader{Width: int32(w), Height: -int32(h), Planes: 1, BitCount: 32}
 	bmi.Size = uint32(unsafe.Sizeof(bmi))
@@ -144,6 +147,31 @@ func (l *layerWin) update(screenDC uintptr, img *image.RGBA, alpha byte, y int) 
 }
 
 func (l *layerWin) show() { _, _, _ = procShowWindow.Call(l.hwnd, swShowNoActivate) }
+
+// excludeFromCapture — operator nie powinien widzieć ramki w podglądzie (Windows 10 2004+).
+// Zwraca opis wyniku do diagnostyki: co Windows faktycznie ustawił.
+func (l *layerWin) excludeFromCapture() string {
+	r, _, e := procSetWindowDisplayAffinity.Call(l.hwnd, wdaExcludeCapture)
+	var got uint32
+	r2, _, e2 := procGetWindowDisplayAffinity.Call(l.hwnd, uintptr(unsafe.Pointer(&got)))
+	res := fmt.Sprintf("%dx%d set=%d", l.w, l.h, r)
+	if r == 0 {
+		res += fmt.Sprintf(" (%v)", e)
+	}
+	if r2 != 0 {
+		res += fmt.Sprintf(" affinity=%#x", got)
+	} else {
+		res += fmt.Sprintf(" get-failed (%v)", e2)
+	}
+	return res
+}
+
+// writeOverlayDiag — wynik ukrywania ramki przed przechwytywaniem (C:\ProgramData\OVERVNC\overlay.log).
+func writeOverlayDiag(lines []string) {
+	v := windows.RtlGetVersion()
+	head := fmt.Sprintf("%s  Windows %d.%d.%d\r\n", time.Now().Format(time.RFC3339), v.MajorVersion, v.MinorVersion, v.BuildNumber)
+	_ = os.WriteFile(filepath.Join(os.Getenv("ProgramData"), "OVERVNC", "overlay.log"), []byte(head+strings.Join(lines, "\r\n")+"\r\n"), 0o644)
+}
 
 func (l *layerWin) raise() {
 	_, _, _ = procSetWindowPos.Call(l.hwnd, ^uintptr(0) /* HWND_TOPMOST */, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
@@ -306,16 +334,20 @@ func startSupportOverlay(name string) {
 				st.notch.update(screenDC, img, 255, y)
 			}
 			if !shown {
+				var diag []string
 				for _, om := range st.mons {
 					for _, w := range om.wins {
 						if w != nil {
 							w.show()
+							diag = append(diag, w.excludeFromCapture())
 						}
 					}
 				}
 				if st.notch != nil {
 					st.notch.show()
+					diag = append(diag, "notch "+st.notch.excludeFromCapture())
 				}
+				writeOverlayDiag(diag)
 				shown = true
 			}
 			// inne okna „zawsze na wierzchu” (np. przeglądarka kiosku) nie mogą przykryć ramki
