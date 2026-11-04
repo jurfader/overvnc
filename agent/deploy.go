@@ -99,8 +99,13 @@ func handleDeployRun(ctx context.Context, data json.RawMessage) (any, error) {
 		_, _ = out.Write([]byte(note))
 		sctx, cancel := context.WithTimeout(rctx, limit)
 		defer cancel()
+		scriptStart := time.Now()
 		res, err := executeScriptOut(sctx, sh, scriptReq{Script: withEnvVar(sh, "OVERVNC_FILE", dest, req.Script), AsUser: req.AsUser}, out)
 		res.DurationMs = time.Since(start).Milliseconds()
+		if err == nil {
+			// instalatory uruchamiane po cichu zwykle nic nie wypisują — wynik polecenia ma być widoczny
+			res.Output = strings.TrimRight(res.Output, "\n") + fmt.Sprintf("\nPolecenie po zapisaniu: kod zakończenia %d (%.1f s)\n", res.ExitCode, time.Since(scriptStart).Seconds())
+		}
 		return res, err
 	})
 }
