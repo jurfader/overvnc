@@ -18,6 +18,11 @@ export function PlacementFields({
 }) {
   const { clients } = useOrg();
   const sites = clients.find((c) => c.id === clientId)?.sites ?? [];
+  // konto przypisane do jednego klienta (np. konto firmy) — wybieramy go od razu
+  const only = !allowNone && clientId === null && clients.length === 1 ? clients[0].id : null;
+  useEffect(() => {
+    if (only !== null) onChange(only, null);
+  }, [only]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="form-2">
       <Field label="Klient">

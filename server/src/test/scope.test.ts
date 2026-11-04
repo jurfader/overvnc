@@ -60,6 +60,27 @@ test('zakres: administrator z ograniczeniem nie przeniesie komputera do cudzego 
   assert.equal((await f.s.app.inject({ method: 'POST', url: '/api/enroll-tokens', cookies: f.admin, payload: { clientId: f.A.clientId } })).statusCode, 200);
 });
 
+test('konto klienta: samo dodaje komputery do swojego klienta i widzi tylko swoje tokeny', async (t) => {
+  const f = await fixture();
+  t.after(f.s.close);
+  // token właściciela dla innego klienta — konto klienta go nie widzi
+  await f.s.app.inject({ method: 'POST', url: '/api/enroll-tokens', cookies: f.owner, payload: { label: 'B', clientId: f.B.clientId } });
+  // konto klienta tworzy token dla swojego klienta i rejestruje nim nowy komputer
+  const mine = await f.s.app.inject({ method: 'POST', url: '/api/enroll-tokens', cookies: f.admin, payload: { label: 'A', clientId: f.A.clientId } });
+  assert.equal(mine.statusCode, 200);
+  const { agentId } = (await f.s.app.inject({ method: 'POST', url: '/api/agent/enroll', payload: { token: mine.json().token, hostname: 'nowy-a' } })).json();
+  const list = (await f.s.app.inject({ url: '/api/agents', cookies: f.admin })).json();
+  assert.deepEqual(list.map((a: any) => a.hostname).sort(), ['nowy-a', 'pc-a']);
+  assert.equal(list.find((a: any) => a.id === agentId).clientId, f.A.clientId);
+  // token dla cudzego klienta — odrzucony
+  assert.equal((await f.s.app.inject({ method: 'POST', url: '/api/enroll-tokens', cookies: f.admin, payload: { clientId: f.B.clientId } })).statusCode, 400);
+  // lista tokenów: tylko jego klienta
+  const tokens = (await f.s.app.inject({ url: '/api/enroll-tokens', cookies: f.admin })).json();
+  assert.deepEqual(tokens.map((x: any) => x.label), ['A']);
+  // ustawienia globalne (aktualizacje) — niedostępne
+  assert.equal((await f.s.app.inject({ url: '/api/updates', cookies: f.admin })).statusCode, 403);
+});
+
 test('zakres: token z klientem przypisuje komputer przy rejestracji', async (t) => {
   const f = await fixture();
   t.after(f.s.close);
