@@ -55,4 +55,85 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS audit_ts ON audit_log(ts DESC);
   `,
+
+  // 2 — organizacja (klienci, lokalizacje, tagi), zespół z rolami, 2FA, sesje z metadanymi (v0.3.0)
+  `
+  CREATE TABLE clients (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    notes      TEXT NOT NULL DEFAULT '',
+    color      TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE sites (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id  INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL COLLATE NOCASE,
+    created_at INTEGER NOT NULL,
+    UNIQUE (client_id, name)
+  );
+
+  CREATE TABLE tags (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    color      TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE agent_tags (
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    tag_id   INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (agent_id, tag_id)
+  );
+
+  ALTER TABLE agents ADD COLUMN client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL;
+  ALTER TABLE agents ADD COLUMN site_id INTEGER REFERENCES sites(id) ON DELETE SET NULL;
+  ALTER TABLE agents ADD COLUMN notes TEXT NOT NULL DEFAULT '';
+  CREATE INDEX agents_client ON agents(client_id);
+
+  ALTER TABLE enroll_tokens ADD COLUMN client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL;
+  ALTER TABLE enroll_tokens ADD COLUMN site_id INTEGER REFERENCES sites(id) ON DELETE SET NULL;
+
+  -- istniejące konta (sprzed ról) stają się właścicielami
+  ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT '';
+  ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'owner';
+  ALTER TABLE users ADD COLUMN all_clients INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE users ADD COLUMN totp_secret TEXT;            -- zaszyfrowany kluczem serwera (AES-256-GCM)
+  ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE users ADD COLUMN totp_last_step INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE users ADD COLUMN last_login_at INTEGER;
+
+  CREATE TABLE user_clients (
+    user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, client_id)
+  );
+
+  CREATE TABLE recovery_codes (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash TEXT NOT NULL,
+    used_at   INTEGER
+  );
+
+  -- drugi krok logowania (kod 2FA) — bilet ważny kilka minut
+  CREATE TABLE login_tickets (
+    ticket_hash TEXT PRIMARY KEY,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at  INTEGER NOT NULL,
+    attempts    INTEGER NOT NULL DEFAULT 0
+  );
+
+  -- sesje dostają publiczne id i metadane (lista aktywnych sesji); stare sesje unieważniamy
+  DELETE FROM sessions;
+  ALTER TABLE sessions ADD COLUMN id TEXT NOT NULL DEFAULT '';
+  ALTER TABLE sessions ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE sessions ADD COLUMN last_seen_at INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE sessions ADD COLUMN ip TEXT;
+  ALTER TABLE sessions ADD COLUMN user_agent TEXT;
+  CREATE INDEX sessions_user ON sessions(user_id);
+  `,
 ];

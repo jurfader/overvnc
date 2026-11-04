@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { WebSocket } from 'ws';
 import { audit, type Db } from './db.ts';
 import { HttpError } from './errors.ts';
+import type { Scope } from './context.ts';
+import { canSeeClient, scopeSql } from './scope.ts';
 
 /**
  * Protokół agent <-> serwer (JSON w ramkach tekstowych WebSocket), opis: docs/protocol.md
@@ -50,6 +52,25 @@ export interface AgentSummary {
   connectedAt: number | null;
   capabilities: string[];
   metrics: unknown;
+  clientId: number | null;
+  clientName: string | null;
+  clientColor: string | null;
+  siteId: number | null;
+  siteName: string | null;
+  tags: TagRef[];
+  notes: string;
+}
+
+export interface TagRef {
+  id: number;
+  name: string;
+  color: string;
+}
+
+interface PanelState {
+  alive: boolean;
+  userId: number;
+  scope: Scope;
 }
 
 export interface AgentRow {
@@ -66,7 +87,15 @@ export interface AgentRow {
   last_ip: string | null;
   enrolled_at: number;
   last_seen: number | null;
+  client_id: number | null;
+  site_id: number | null;
+  notes: string;
 }
+
+type SummaryRow = AgentRow & { client_name: string | null; client_color: string | null; site_name: string | null };
+
+const SUMMARY_SQL = `SELECT a.*, c.name AS client_name, c.color AS client_color, s.name AS site_name
+  FROM agents a LEFT JOIN clients c ON c.id = a.client_id LEFT JOIN sites s ON s.id = a.site_id`;
 
 const PING_INTERVAL_MS = 30_000;
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -75,7 +104,7 @@ export class Hub {
   private agents = new Map<string, AgentConn>();
   private panels = new Set<WebSocket>();
   private pending = new Map<string, Pending>();
-  private panelState = new WeakMap<WebSocket, { alive: boolean }>();
+  private panelState = new Map<WebSocket, PanelState>();
   private db: Db;
   private pingTimer: NodeJS.Timeout;
   private closed = false;
@@ -99,6 +128,7 @@ export class Hub {
     for (const p of this.panels) p.terminate();
     this.agents.clear();
     this.panels.clear();
+    this.panelState.clear();
   }
 
   // ---------- agenci ----------
@@ -131,10 +161,10 @@ export class Hub {
       this.rejectPendingFor(agentId, new HttpError(502, 'agent_disconnected', 'Komputer rozłączył się w trakcie operacji.'));
       this.db.prepare('UPDATE agents SET last_seen = ? WHERE id = ?').run(Date.now(), agentId);
       audit(this.db, `agent:${agentId}`, 'agent.disconnect', agentId, null, ip);
-      this.broadcast({ type: 'agent_offline', id: agentId });
+      this.broadcastAgent(agentId, { type: 'agent_offline', id: agentId });
     });
 
-    this.broadcast({ type: 'agent_online', id: agentId, data: this.summary(agentId) });
+    this.broadcastAgent(agentId, { type: 'agent_online', id: agentId, data: this.summary(agentId) });
   }
 
   private handleAgentMessage(agentId: string, conn: AgentConn, msg: Envelope): void {
@@ -146,17 +176,17 @@ export class Hub {
         conn.capabilities = Array.isArray(d.capabilities) ? d.capabilities.filter((c): c is string => typeof c === 'string') : [];
         this.db.prepare('UPDATE agents SET agent_version = ?, last_seen = ? WHERE id = ?').run(str(d.version), now, agentId);
         if (d.inventory) this.storeInventory(agentId, d.inventory);
-        this.broadcast({ type: 'agent_updated', id: agentId, data: this.summary(agentId) });
+        this.broadcastAgent(agentId, { type: 'agent_updated', id: agentId, data: this.summary(agentId) });
         break;
       }
       case 'inventory': {
         this.storeInventory(agentId, (msg.data ?? {}) as Record<string, any>);
-        this.broadcast({ type: 'agent_updated', id: agentId, data: this.summary(agentId) });
+        this.broadcastAgent(agentId, { type: 'agent_updated', id: agentId, data: this.summary(agentId) });
         break;
       }
       case 'metrics': {
         this.db.prepare('UPDATE agents SET metrics_json = ?, last_seen = ? WHERE id = ?').run(JSON.stringify(msg.data ?? {}), now, agentId);
-        this.broadcast({ type: 'agent_metrics', id: agentId, data: msg.data });
+        this.broadcastAgent(agentId, { type: 'agent_metrics', id: agentId, data: msg.data });
         break;
       }
       case 'result':
@@ -229,34 +259,73 @@ export class Hub {
     return this.agents.has(agentId);
   }
 
-  // ---------- panele (przeglądarki administratorów) ----------
+  // ---------- panele (przeglądarki zespołu) ----------
 
-  attachPanel(socket: WebSocket): void {
-    const state = { alive: true };
+  attachPanel(socket: WebSocket, userId: number, scope: Scope): void {
+    if (this.closed) return void socket.terminate();
+    const state: PanelState = { alive: true, userId, scope };
     this.panels.add(socket);
     this.panelState.set(socket, state);
     socket.on('pong', () => (state.alive = true));
-    socket.on('close', () => this.panels.delete(socket));
+    socket.on('close', () => {
+      this.panels.delete(socket);
+      this.panelState.delete(socket);
+    });
   }
 
-  broadcast(msg: Envelope): void {
+  /** Zdarzenie bez danych wrażliwych do wszystkich paneli (np. zmiana listy klientów/tagów — panel sam pobierze to, co widzi). */
+  broadcastAll(msg: Envelope): void {
     const payload = JSON.stringify(msg);
-    for (const p of this.panels) if (p.readyState === p.OPEN) p.send(payload);
+    for (const socket of this.panelState.keys()) if (socket.readyState === socket.OPEN) socket.send(payload);
+  }
+
+  /** Rozłącza panele konta (np. po zmianie roli/zakresu lub blokadzie) — panel połączy się ponownie z nowym zakresem. */
+  disconnectPanelsOf(userId: number): void {
+    for (const [socket, st] of this.panelState) if (st.userId === userId) socket.close(4003, 'session changed');
+  }
+
+  /**
+   * Zdarzenie dotyczące komputera trafia tylko do paneli, które go widzą.
+   * Po zmianie klienta (agent_updated) panele, które utraciły widoczność, dostają agent_removed.
+   */
+  broadcastAgent(agentId: string, msg: Envelope): void {
+    const row = this.db.prepare('SELECT client_id FROM agents WHERE id = ?').get(agentId) as { client_id: number | null } | undefined;
+    const payload = JSON.stringify(msg);
+    let removal: string | null = null;
+    for (const [socket, st] of this.panelState) {
+      if (socket.readyState !== socket.OPEN) continue;
+      if (!row || canSeeClient(st.scope, row.client_id)) socket.send(payload);
+      else if (msg.type === 'agent_updated') socket.send((removal ??= JSON.stringify({ type: 'agent_removed', id: agentId })));
+    }
   }
 
   // ---------- odczyt ----------
 
   summary(agentId: string): AgentSummary | null {
-    const row = this.db.prepare('SELECT * FROM agents WHERE id = ?').get(agentId) as AgentRow | undefined;
-    return row ? this.rowToSummary(row) : null;
+    const row = this.db.prepare(`${SUMMARY_SQL} WHERE a.id = ?`).get(agentId) as SummaryRow | undefined;
+    if (!row) return null;
+    const tags = this.db
+      .prepare('SELECT t.id, t.name, t.color FROM agent_tags x JOIN tags t ON t.id = x.tag_id WHERE x.agent_id = ? ORDER BY t.name')
+      .all(agentId) as unknown as TagRef[];
+    return this.toSummary(row, tags);
   }
 
-  listSummaries(): AgentSummary[] {
-    const rows = this.db.prepare('SELECT * FROM agents ORDER BY hostname COLLATE NOCASE').all() as unknown as AgentRow[];
-    return rows.map((r) => this.rowToSummary(r));
+  listSummaries(scope: Scope): AgentSummary[] {
+    const where = scopeSql(scope, 'a.client_id');
+    const rows = this.db.prepare(`${SUMMARY_SQL} WHERE ${where.sql} ORDER BY a.hostname COLLATE NOCASE`).all(...where.params) as unknown as SummaryRow[];
+    const tagRows = this.db
+      .prepare('SELECT x.agent_id, t.id, t.name, t.color FROM agent_tags x JOIN tags t ON t.id = x.tag_id ORDER BY t.name')
+      .all() as unknown as (TagRef & { agent_id: string })[];
+    const byAgent = new Map<string, TagRef[]>();
+    for (const t of tagRows) {
+      const list = byAgent.get(t.agent_id) ?? [];
+      list.push({ id: t.id, name: t.name, color: t.color });
+      byAgent.set(t.agent_id, list);
+    }
+    return rows.map((r) => this.toSummary(r, byAgent.get(r.id) ?? []));
   }
 
-  rowToSummary(r: AgentRow): AgentSummary {
+  private toSummary(r: SummaryRow, tags: TagRef[]): AgentSummary {
     const conn = this.agents.get(r.id);
     return {
       id: r.id,
@@ -273,6 +342,13 @@ export class Hub {
       connectedAt: conn?.connectedAt ?? null,
       capabilities: conn?.capabilities ?? [],
       metrics: r.metrics_json ? JSON.parse(r.metrics_json) : null,
+      clientId: r.client_id,
+      clientName: r.client_name,
+      clientColor: r.client_color,
+      siteId: r.site_id,
+      siteName: r.site_name,
+      tags,
+      notes: r.notes,
     };
   }
 
@@ -285,13 +361,12 @@ export class Hub {
       conn.alive = false;
       conn.socket.ping();
     }
-    for (const p of this.panels) {
-      const st = this.panelState.get(p);
-      if (st && !st.alive) {
+    for (const [p, st] of this.panelState) {
+      if (!st.alive) {
         p.terminate();
         continue;
       }
-      if (st) st.alive = false;
+      st.alive = false;
       p.ping();
     }
   }

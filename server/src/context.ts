@@ -2,21 +2,42 @@ import type { Config } from './config.ts';
 import type { Db } from './db.ts';
 import type { Hub } from './hub.ts';
 import type { RateLimiter } from './ratelimit.ts';
+import type { Role } from './permissions.ts';
 
 /** Zależności współdzielone przez wszystkie moduły tras. */
 export interface Ctx {
   config: Config;
   db: Db;
   hub: Hub;
+  /** Klucz AES-256 do szyfrowania sekretów w bazie. */
+  secretKey: Buffer;
   limits: {
     login: RateLimiter;
     enroll: RateLimiter;
   };
 }
 
-export interface SessionUser {
+/**
+ * Konto ma ograniczony dostęp, dopóki nie wykona wymaganej czynności:
+ * - password_change_required — logowanie hasłem tymczasowym nadanym przez właściciela,
+ * - mfa_setup_required — rola wymaga 2FA, a nie jest skonfigurowane.
+ */
+export type Restriction = 'password_change_required' | 'mfa_setup_required' | null;
+
+/** Zakres widoczności komputerów (wg klientów). */
+export interface Scope {
+  allClients: boolean;
+  clientIds: number[];
+}
+
+export interface SessionUser extends Scope {
   id: number;
   username: string;
+  displayName: string;
+  role: Role;
+  sessionId: string;
+  mfaEnabled: boolean;
+  restriction: Restriction;
 }
 
 declare module 'fastify' {

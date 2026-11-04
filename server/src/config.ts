@@ -16,6 +16,10 @@ export interface Config {
   trustProxy: boolean;
   logLevel: string;
   sessionTtlMs: number;
+  /** Plik z kluczem szyfrującym sekrety (np. TOTP); null = klucz tymczasowy w pamięci (testy). */
+  keyFile: string | null;
+  /** Wymuszaj 2FA dla właścicieli i administratorów (REQUIRE_2FA=0 wyłącza — tylko do developmentu). */
+  requireMfa: boolean;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -29,5 +33,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     trustProxy: env.TRUST_PROXY === '1',
     logLevel: env.LOG_LEVEL ?? 'info',
     sessionTtlMs: 12 * 60 * 60 * 1000,
+    keyFile: path.join(dataDir, 'secret.key'),
+    requireMfa: env.REQUIRE_2FA !== '0',
   };
 }

@@ -1,5 +1,5 @@
-import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
-import { AlertCircle, CheckCircle2, Laptop, Monitor, Server, type LucideIcon } from 'lucide-react';
+import { useEffect, useState, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from 'react';
+import { AlertCircle, CheckCircle2, Copy, Download, Laptop, Monitor, Server, type LucideIcon } from 'lucide-react';
 import { osLabel } from './format.ts';
 
 // ---------- przycisk ----------
@@ -118,7 +118,7 @@ export function EmptyState({ icon: Icon, title, text, children }: { icon: Lucide
 
 // ---------- okno modalne ----------
 
-export function Modal({ open, onClose, children }: { open: boolean; onClose: () => void; children: ReactNode }) {
+export function Modal({ open, onClose, children, wide }: { open: boolean; onClose: () => void; children: ReactNode; wide?: boolean }) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -128,7 +128,7 @@ export function Modal({ open, onClose, children }: { open: boolean; onClose: () 
   if (!open) return null;
   return (
     <div className="okno-tlo anim-fade" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="okno anim-pop" role="dialog" aria-modal="true">
+      <div className={`okno anim-pop ${wide ? 'wide' : ''}`} role="dialog" aria-modal="true">
         {children}
       </div>
     </div>
@@ -192,4 +192,132 @@ export function applyTheme(t: Theme): void {
   } catch {
     /* tryb prywatny itp. */
   }
+}
+
+// ---------- organizacja: tagi, klienci, kolory ----------
+
+export const PALETTE = ['#E91E8C', '#9B26D9', '#3B82F6', '#06B6D4', '#22C55E', '#F59E0B', '#EF4444', '#64748B'];
+
+export function TagChip({ name, color, onRemove }: { name: string; color: string; onRemove?: () => void }) {
+  return (
+    <span className="chip" style={{ '--c': color || '#8B8BA0' } as CSSProperties}>
+      {name}
+      {onRemove && (
+        <button type="button" className="chip-x" onClick={onRemove} aria-label={`Usuń ${name}`}>
+          ×
+        </button>
+      )}
+    </span>
+  );
+}
+
+export function ClientLabel({ name, color, site }: { name: string | null; color?: string | null; site?: string | null }) {
+  if (!name) return <span className="muted small">bez klienta</span>;
+  return (
+    <span className="client-label">
+      <span className="client-dot" style={{ background: color || 'rgb(var(--faint))' }} />
+      <span style={{ minWidth: 0 }}>
+        <span className="strong nowrap">{name}</span>
+        {site && <span className="muted small client-site">{site}</span>}
+      </span>
+    </span>
+  );
+}
+
+export function ColorPicker({ value, onChange }: { value: string; onChange: (c: string) => void }) {
+  return (
+    <div className="swatches" role="radiogroup" aria-label="Kolor">
+      {PALETTE.map((c) => (
+        <button
+          key={c}
+          type="button"
+          role="radio"
+          aria-checked={value.toLowerCase() === c.toLowerCase()}
+          className={`swatch ${value.toLowerCase() === c.toLowerCase() ? 'on' : ''}`}
+          style={{ background: c }}
+          onClick={() => onChange(c)}
+          aria-label={c}
+        />
+      ))}
+    </div>
+  );
+}
+
+export function Tabs<T extends string>({ value, onChange, items }: { value: T; onChange: (v: T) => void; items: { value: T; label: ReactNode }[] }) {
+  return (
+    <div className="tabs" role="tablist">
+      {items.map((it) => (
+        <button key={it.value} role="tab" aria-selected={value === it.value} className={`tab ${value === it.value ? 'on' : ''}`} onClick={() => onChange(it.value)}>
+          {it.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function Checkbox({ checked, indeterminate, onChange, label }: { checked: boolean; indeterminate?: boolean; onChange: (v: boolean) => void; label?: string }) {
+  return (
+    <input
+      type="checkbox"
+      className="cb"
+      aria-label={label}
+      checked={checked}
+      ref={(el) => {
+        if (el) el.indeterminate = !!indeterminate;
+      }}
+      onChange={(e) => onChange(e.target.checked)}
+      onClick={(e) => e.stopPropagation()}
+    />
+  );
+}
+
+/** Pole formularza z etykietą i podpowiedzią. */
+export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
+  return (
+    <label className="field">
+      {label}
+      {children}
+      {hint && <span className="field-hint">{hint}</span>}
+    </label>
+  );
+}
+
+/** Lista haseł/kodów do skopiowania (hasło tymczasowe, kody zapasowe). */
+export function SecretBox({ lines, filename }: { lines: string[]; filename?: string }) {
+  const [copied, setCopied] = useState(false);
+  const text = lines.join('\n');
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast('Nie udało się skopiować — zaznacz ręcznie', 'err');
+    }
+  };
+  const download = () => {
+    const url = URL.createObjectURL(new Blob([text + '\n'], { type: 'text/plain' }));
+    const a = Object.assign(document.createElement('a'), { href: url, download: filename ?? 'overvnc.txt' });
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <div className="secret-box">
+      <div className={`secret-lines ${lines.length > 1 ? 'grid-codes' : ''}`}>
+        {lines.map((l) => (
+          <code key={l}>{l}</code>
+        ))}
+      </div>
+      <div className="secret-actions">
+        <Button size="sm" variant={copied ? 'outline' : 'secondary'} icon={copied ? CheckCircle2 : Copy} onClick={copy}>
+          {copied ? 'Skopiowano' : 'Kopiuj'}
+        </Button>
+        {filename && (
+          <Button size="sm" variant="secondary" icon={Download} onClick={download}>
+            Pobierz
+          </Button>
+        )}
+      </div>
+    </div>
+  );
 }

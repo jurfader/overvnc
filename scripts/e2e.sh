@@ -17,7 +17,7 @@ echo "→ budowanie agenta"
 (cd "$ROOT/agent" && go build -o "$WORK/agent" .)
 
 echo "→ start serwera na :$PORT"
-(cd "$ROOT/server" && DATA_DIR="$WORK/data" PORT=$PORT PANEL_DIR=/nonexistent LOG_LEVEL=warn ADMIN_PASSWORD=e2e-password-123 node src/index.ts >"$WORK/server.log" 2>&1) &
+(cd "$ROOT/server" && DATA_DIR="$WORK/data" PORT=$PORT PANEL_DIR=/nonexistent LOG_LEVEL=warn REQUIRE_2FA=0 ADMIN_PASSWORD=e2e-password-123 node src/index.ts >"$WORK/server.log" 2>&1) &
 PIDS+=($!)
 for i in $(seq 100); do curl -s -o /dev/null "$B/api/auth/me" && break; [ "$i" = 100 ] && fail "serwer nie wystartował"; sleep 0.1; done
 

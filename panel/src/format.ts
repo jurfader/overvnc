@@ -47,3 +47,11 @@ export function platformLabel(os: string, platform: string): string {
   if (os === 'darwin') return platform.replace(/^darwin/i, 'macOS');
   return platform.charAt(0).toUpperCase() + platform.slice(1);
 }
+
+/** Polska odmiana liczebników: plural(2, 'komputer', 'komputery', 'komputerów') -> 'komputery'. */
+export function plural(n: number, one: string, few: string, many: string): string {
+  if (n === 1) return one;
+  const d = n % 10;
+  const h = n % 100;
+  return d >= 2 && d <= 4 && (h < 12 || h > 14) ? few : many;
+}

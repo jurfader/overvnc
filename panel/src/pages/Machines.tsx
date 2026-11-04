@@ -1,10 +1,12 @@
-import { useMemo, useState, type ReactNode } from 'react';
-import { AlertTriangle, Monitor, PlusCircle, Power, Search, Wifi } from 'lucide-react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { AlertTriangle, Building2, FilterX, Monitor, PlusCircle, Power, Search, Tag as TagIcon, Wifi, X } from 'lucide-react';
 import type { Agent } from '../api.ts';
-import { Badge, EmptyState, Meter, OsBadge, osIcon, StatTile, Status } from '../components.tsx';
-import { ago, bytes, platformLabel } from '../format.ts';
+import { Badge, Button, Checkbox, ClientLabel, EmptyState, Meter, OsBadge, osIcon, StatTile, Status, TagChip } from '../components.tsx';
+import { ago, bytes, platformLabel, plural } from '../format.ts';
+import { useMe, useOrg } from '../state.tsx';
+import { BulkModal, type BulkMode } from './organize.tsx';
 
-type Filter = 'all' | 'online' | 'offline' | 'alert';
+type StatusFilter = 'all' | 'online' | 'offline' | 'alert';
 
 /** Komputer wymaga uwagi, gdy CPU, RAM lub któryś dysk przekracza 90%. */
 function alerts(a: Agent): string[] {
@@ -17,61 +19,179 @@ function alerts(a: Agent): string[] {
   return out;
 }
 
-export function Machines({ agents }: { agents: Agent[] }) {
+const NONE = -1; // filtr „bez klienta”
+
+export function Machines({ agents, initialClient }: { agents: Agent[]; initialClient: number | null }) {
+  const { can, me } = useMe();
+  const { clients, tags } = useOrg();
   const [q, setQ] = useState('');
-  const [filter, setFilter] = useState<Filter>('all');
+  const [status, setStatus] = useState<StatusFilter>('all');
+  const [clientF, setClientF] = useState<number | null>(initialClient);
+  const [siteF, setSiteF] = useState<number | null>(null);
+  const [tagF, setTagF] = useState<number | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulk, setBulk] = useState<BulkMode | null>(null);
+  const manage = can('agents.manage');
+
+  useEffect(() => setClientF(initialClient), [initialClient]);
+  useEffect(() => setSiteF(null), [clientF]);
 
   const online = agents.filter((a) => a.online).length;
   const alerting = agents.filter((a) => alerts(a).length > 0).length;
+  const sites = clients.find((c) => c.id === clientF)?.sites ?? [];
+  const filtersActive = !!q || status !== 'all' || clientF !== null || tagF !== null;
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return agents
-      .filter((a) => filter === 'all' || (filter === 'alert' ? alerts(a).length > 0 : (filter === 'online') === a.online))
-      .filter((a) => !needle || [a.hostname, a.label, a.platform, a.lastIp ?? ''].some((s) => s.toLowerCase().includes(needle)))
+      .filter((a) => status === 'all' || (status === 'alert' ? alerts(a).length > 0 : (status === 'online') === a.online))
+      .filter((a) => clientF === null || (clientF === NONE ? a.clientId === null : a.clientId === clientF))
+      .filter((a) => siteF === null || a.siteId === siteF)
+      .filter((a) => tagF === null || a.tags.some((t) => t.id === tagF))
+      .filter(
+        (a) =>
+          !needle ||
+          [a.hostname, a.label, a.platform, a.lastIp ?? '', a.clientName ?? '', a.siteName ?? '', a.notes, ...a.tags.map((t) => t.name)].some((s) =>
+            s.toLowerCase().includes(needle),
+          ),
+      )
       .sort((a, b) => Number(b.online) - Number(a.online) || (a.label || a.hostname).localeCompare(b.label || b.hostname, 'pl'));
-  }, [agents, q, filter]);
+  }, [agents, q, status, clientF, siteF, tagF]);
+
+  // zaznaczenie obejmuje tylko widoczne wiersze — po zmianie filtrów czyścimy niewidoczne
+  useEffect(() => {
+    setSelected((prev) => {
+      const visible = new Set(rows.map((r) => r.id));
+      const next = new Set([...prev].filter((id) => visible.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [rows]);
+
+  const allSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
+  const toggleAll = (v: boolean) => setSelected(v ? new Set(rows.map((r) => r.id)) : new Set());
+  const toggle = (id: string, v: boolean) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (v) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+
+  const clearFilters = () => {
+    setQ('');
+    setStatus('all');
+    setClientF(null);
+    setTagF(null);
+  };
 
   if (agents.length === 0)
     return (
       <>
         <PageHead />
-        <EmptyState icon={Monitor} title="Brak komputerów" text="Utwórz token rejestracji i zainstaluj agenta OVERVNC na pierwszym komputerze.">
-          <a className="btn btn-primary" href="#/tokens">
-            <PlusCircle /> Dodaj pierwszy komputer
-          </a>
+        <EmptyState
+          icon={Monitor}
+          title="Brak komputerów"
+          text={me.allClients ? 'Utwórz token rejestracji i zainstaluj agenta OVERVNC na pierwszym komputerze.' : 'Twoi klienci nie mają jeszcze komputerów.'}
+        >
+          {can('tokens.manage') && (
+            <a className="btn btn-primary" href="#/tokens">
+              <PlusCircle /> Dodaj pierwszy komputer
+            </a>
+          )}
         </EmptyState>
       </>
     );
 
   return (
     <>
-      <PageHead>
-        <div className="search">
-          <Search />
-          <input className="pole" placeholder="Szukaj: nazwa, system, IP…" value={q} onChange={(e) => setQ(e.target.value)} />
-        </div>
-        <select className="pole" style={{ width: 'auto' }} value={filter} onChange={(e) => setFilter(e.target.value as Filter)}>
-          <option value="all">Wszystkie</option>
-          <option value="online">Online</option>
-          <option value="offline">Offline</option>
-          <option value="alert">Wymagają uwagi</option>
-        </select>
-      </PageHead>
+      <PageHead />
 
       <section className="grid grid-stats">
-        <StatTile icon={Monitor} label="Wszystkie komputery" value={agents.length} hint="zarejestrowane w panelu" />
+        <StatTile icon={Monitor} label="Wszystkie komputery" value={agents.length} hint={clients.length ? `u ${clients.length} ${plural(clients.length, 'klienta', 'klientów', 'klientów')}` : 'zarejestrowane w panelu'} />
         <StatTile icon={Wifi} label="Online" value={online} hint={`${agents.length ? Math.round((online / agents.length) * 100) : 0}% floty`} delay={40} />
         <StatTile icon={Power} label="Offline" value={agents.length - online} hint="wyłączone lub bez sieci" delay={80} />
         <StatTile icon={AlertTriangle} label="Wymagają uwagi" value={alerting} hint="CPU, RAM lub dysk ≥ 90%" delay={120} />
       </section>
+
+      <div className="filters anim-rise" style={{ animationDelay: '140ms' }}>
+        <div className="search">
+          <Search />
+          <input className="pole" placeholder="Szukaj: nazwa, IP, klient, tag…" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <select className="pole" value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)} aria-label="Status">
+          <option value="all">Każdy status</option>
+          <option value="online">Online</option>
+          <option value="offline">Offline</option>
+          <option value="alert">Wymagają uwagi</option>
+        </select>
+        {clients.length > 0 && (
+          <select className="pole" value={clientF ?? ''} onChange={(e) => setClientF(e.target.value === '' ? null : Number(e.target.value))} aria-label="Klient">
+            <option value="">Wszyscy klienci</option>
+            {me.allClients && <option value={NONE}>— bez klienta —</option>}
+            {clients.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        )}
+        {sites.length > 0 && (
+          <select className="pole" value={siteF ?? ''} onChange={(e) => setSiteF(e.target.value === '' ? null : Number(e.target.value))} aria-label="Lokalizacja">
+            <option value="">Wszystkie lokalizacje</option>
+            {sites.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        )}
+        {tags.length > 0 && (
+          <select className="pole" value={tagF ?? ''} onChange={(e) => setTagF(e.target.value === '' ? null : Number(e.target.value))} aria-label="Tag">
+            <option value="">Wszystkie tagi</option>
+            {tags.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        )}
+        {filtersActive && (
+          <Button variant="ghost" icon={FilterX} onClick={clearFilters}>
+            Wyczyść
+          </Button>
+        )}
+      </div>
+
+      {manage && selected.size > 0 && (
+        <div className="bulk-bar anim-pop">
+          <span className="count">
+            Zaznaczono: {selected.size} {plural(selected.size, 'komputer', 'komputery', 'komputerów')}
+          </span>
+          <Button size="sm" icon={Building2} onClick={() => setBulk('place')}>
+            Przypisz do klienta
+          </Button>
+          <Button size="sm" icon={TagIcon} onClick={() => setBulk('addTags')}>
+            Dodaj tagi
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setBulk('removeTags')}>
+            Usuń tagi
+          </Button>
+          <Button size="sm" variant="ghost" icon={X} title="Odznacz" onClick={() => setSelected(new Set())} />
+        </div>
+      )}
 
       <div className="glass-card table-card anim-rise" style={{ animationDelay: '160ms' }}>
         <div className="table-scroll">
           <table className="table hover clickable">
             <thead>
               <tr>
+                {manage && (
+                  <th className="cb-cell">
+                    <Checkbox label="Zaznacz wszystkie" checked={allSelected} indeterminate={selected.size > 0 && !allSelected} onChange={toggleAll} />
+                  </th>
+                )}
                 <th>Komputer</th>
+                <th>Klient</th>
                 <th>Status</th>
                 <th>System</th>
                 <th className="w-bar">CPU</th>
@@ -86,18 +206,34 @@ export function Machines({ agents }: { agents: Agent[] }) {
                 const disk = m?.disks?.reduce((x, d) => (d.usedPercent > x.usedPercent ? d : x), m.disks[0]);
                 const Icon = osIcon(a.os);
                 const warn = alerts(a);
+                const isSel = selected.has(a.id);
                 return (
-                  <tr key={a.id} onClick={() => (location.hash = `/m/${a.id}`)}>
+                  <tr key={a.id} className={isSel ? 'row-selected' : ''} onClick={() => (location.hash = `/m/${a.id}`)}>
+                    {manage && (
+                      <td className="cb-cell" onClick={(e) => e.stopPropagation()}>
+                        <Checkbox label={`Zaznacz ${a.label || a.hostname}`} checked={isSel} onChange={(v) => toggle(a.id, v)} />
+                      </td>
+                    )}
                     <td>
                       <div className="host">
                         <span className={`host-icon ${a.online ? 'on' : ''}`}>
                           <Icon />
                         </span>
-                        <div>
+                        <div style={{ minWidth: 0 }}>
                           <div className="strong">{a.label || a.hostname}</div>
                           <div className="muted small">{a.label ? a.hostname : (a.lastIp ?? '—')}</div>
+                          {a.tags.length > 0 && (
+                            <div className="chips" style={{ marginTop: 4 }}>
+                              {a.tags.map((t) => (
+                                <TagChip key={t.id} name={t.name} color={t.color} />
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
+                    </td>
+                    <td>
+                      <ClientLabel name={a.clientName} color={a.clientColor} site={a.siteName} />
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -130,8 +266,11 @@ export function Machines({ agents }: { agents: Agent[] }) {
               })}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="center-text">
-                    Brak komputerów pasujących do filtrów.
+                  <td colSpan={manage ? 9 : 8} className="center-text">
+                    Brak komputerów pasujących do filtrów.{' '}
+                    <button className="link-btn" style={{ display: 'inline-flex' }} onClick={clearFilters}>
+                      Wyczyść filtry
+                    </button>
                   </td>
                 </tr>
               )}
@@ -139,6 +278,16 @@ export function Machines({ agents }: { agents: Agent[] }) {
           </table>
         </div>
       </div>
+
+      <BulkModal
+        mode={bulk}
+        ids={[...selected]}
+        onClose={() => setBulk(null)}
+        onDone={() => {
+          setBulk(null);
+          setSelected(new Set());
+        }}
+      />
     </>
   );
 }

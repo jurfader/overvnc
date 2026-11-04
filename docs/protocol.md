@@ -22,6 +22,8 @@ Ramki tekstowe zawierają JSON w jednej kopercie:
 { type: string, id?: string, data?: any, error?: { code: string, message: string } }
 ```
 
+Zdarzenia serwer → panel (`/ws/panel`) są filtrowane zakresem klientów zalogowanego konta: `agent_online`, `agent_offline`, `agent_updated`, `agent_metrics`, `agent_added`, `agent_removed` (także gdy komputer wypadnie z zakresu) oraz `org_changed` (zmienili się klienci/lokalizacje/tagi — panel pobiera słowniki ponownie). Zmiana roli lub zakresu konta zamyka jego panel kodem `4003`; panel łączy się ponownie z nowym zakresem.
+
 Ramki binarne są zarezerwowane na strumienie: pulpit zdalny i przesył plików.
 
 ### Zdarzenia agent → serwer (bez `id`)
@@ -75,9 +77,12 @@ Każda odpowiedź błędu z API ma ten sam format:
 | HTTP | error | znaczenie |
 |---|---|---|
 | 400 | `validation` | nieprawidłowe dane (`details`: lista pól) |
-| 401 | `unauthorized`, `invalid_credentials` | brak sesji / złe dane logowania |
-| 403 | `invalid_token`, `bad_origin` | zły token rejestracji / obce Origin WebSocketu |
-| 404 | `not_found` | brak zasobu |
+| 401 | `unauthorized`, `invalid_credentials`, `invalid_code`, `ticket_expired` | brak sesji / złe dane logowania / zły kod 2FA / wygasł drugi krok logowania |
+| 403 | `forbidden` | rola nie ma uprawnienia albo operacja wymaga dostępu do wszystkich klientów |
+| 403 | `password_change_required`, `mfa_setup_required` | konto musi najpierw ustawić hasło / skonfigurować 2FA |
+| 403 | `account_disabled`, `invalid_token`, `bad_origin` | konto zablokowane / zły token rejestracji / obce Origin WebSocketu |
+| 404 | `not_found` | brak zasobu **lub zasób poza zakresem klientów konta** (celowo nieodróżnialne) |
+| 409 | `name_taken`, `username_taken`, `last_owner`, `self_delete`, `self_disable` | konflikt nazw / ochrona ostatniego właściciela i własnego konta |
 | 409 | `agent_offline` | komputer offline |
 | 422 | kod z agenta | agent zgłosił błąd wykonania |
 | 429 | `too_many_attempts` | limit prób |

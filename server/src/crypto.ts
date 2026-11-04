@@ -1,4 +1,6 @@
-import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { promisify } from 'node:util';
 
 const scryptAsync = promisify(scrypt) as (pw: string, salt: Buffer, keylen: number, opts: object) => Promise<Buffer>;
@@ -33,4 +35,38 @@ export function safeEqualHex(a: string, b: string): boolean {
   const ba = Buffer.from(a, 'hex');
   const bb = Buffer.from(b, 'hex');
   return ba.length === bb.length && timingSafeEqual(ba, bb);
+}
+
+// ---------- szyfrowanie sekretów w bazie (AES-256-GCM) ----------
+// Klucz leży w osobnym pliku (DATA_DIR/secret.key, 0600), więc wyciek samej bazy lub jej kopii
+// nie ujawnia sekretów 2FA. Klucz trzeba backupować razem z bazą.
+
+/** Wczytuje klucz serwera albo tworzy go przy pierwszym starcie. null = klucz tymczasowy (testy). */
+export function loadOrCreateKey(file: string | null): Buffer {
+  if (!file) return randomBytes(32);
+  if (existsSync(file)) {
+    const key = Buffer.from(readFileSync(file, 'utf8').trim(), 'base64');
+    if (key.length !== 32) throw new Error(`Nieprawidłowy klucz w ${file} (oczekiwano 32 bajtów base64).`);
+    return key;
+  }
+  mkdirSync(path.dirname(file), { recursive: true });
+  const key = randomBytes(32);
+  writeFileSync(file, key.toString('base64') + '\n', { mode: 0o600, flag: 'wx' });
+  chmodSync(file, 0o600);
+  return key;
+}
+
+export function encryptSecret(key: Buffer, plaintext: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const ct = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  return `v1:${Buffer.concat([iv, cipher.getAuthTag(), ct]).toString('base64')}`;
+}
+
+export function decryptSecret(key: Buffer, stored: string): string {
+  if (!stored.startsWith('v1:')) throw new Error('nieznany format zaszyfrowanego sekretu');
+  const raw = Buffer.from(stored.slice(3), 'base64');
+  const decipher = createDecipheriv('aes-256-gcm', key, raw.subarray(0, 12));
+  decipher.setAuthTag(raw.subarray(12, 28));
+  return Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString('utf8');
 }

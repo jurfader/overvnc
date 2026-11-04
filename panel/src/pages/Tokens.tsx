@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { AlertTriangle, Check, Copy, KeyRound, Laptop, Monitor, PlusCircle, ShieldCheck, Terminal, Trash2 } from 'lucide-react';
 import { api, errorMessage, type EnrollToken } from '../api.ts';
-import { Badge, Button, CardHead, toast } from '../components.tsx';
+import { Badge, Button, CardHead, ClientLabel, toast } from '../components.tsx';
+import { useMe } from '../state.tsx';
+import { PlacementFields } from './organize.tsx';
 import { dateTime } from '../format.ts';
 
 export function Tokens() {
@@ -11,6 +13,9 @@ export function Tokens() {
   const [maxUses, setMaxUses] = useState('1');
   const [created, setCreated] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [clientId, setClientId] = useState<number | null>(null);
+  const [siteId, setSiteId] = useState<number | null>(null);
+  const { me } = useMe();
 
   const load = () => api.tokens().then(setTokens, () => {});
   useEffect(() => {
@@ -21,7 +26,7 @@ export function Tokens() {
     e.preventDefault();
     setBusy(true);
     try {
-      const r = await api.createToken(label, ttl, maxUses.trim() === '' ? null : Number(maxUses));
+      const r = await api.createToken({ label, ttlHours: ttl, maxUses: maxUses.trim() === '' ? null : Number(maxUses), clientId, siteId });
       setCreated(r.token);
       setLabel('');
       load();
@@ -72,6 +77,12 @@ export function Tokens() {
             Utwórz token
           </Button>
         </form>
+        <div style={{ marginTop: 14 }}>
+          <PlacementFields clientId={clientId} siteId={siteId} allowNone={me.allClients} onChange={(c, s) => (setClientId(c), setSiteId(s))} />
+          <div className="field-hint" style={{ marginTop: 6 }}>
+            Komputery zarejestrowane tym tokenem trafią od razu do wybranego klienta i lokalizacji.
+          </div>
+        </div>
         <div className="callout callout-brand" style={{ marginTop: 16 }}>
           <ShieldCheck />
           <span>
@@ -106,6 +117,7 @@ export function Tokens() {
             <thead>
               <tr>
                 <th>Opis</th>
+                <th>Klient</th>
                 <th>Status</th>
                 <th>Pozostało użyć</th>
                 <th>Wygasa</th>
@@ -120,6 +132,9 @@ export function Tokens() {
                 return (
                   <tr key={t.id}>
                     <td className="strong">{t.label}</td>
+                    <td>
+                      <ClientLabel name={t.clientName} site={t.siteName} />
+                    </td>
                     <td>{expired ? <Badge>Wygasł</Badge> : used ? <Badge>Wykorzystany</Badge> : <Badge variant="success">Aktywny</Badge>}</td>
                     <td>{t.usesLeft ?? '∞'}</td>
                     <td className="small ink-2">{dateTime(t.expiresAt)}</td>
@@ -132,7 +147,7 @@ export function Tokens() {
               })}
               {tokens.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="center-text">
+                  <td colSpan={7} className="center-text">
                     Brak tokenów.
                   </td>
                 </tr>

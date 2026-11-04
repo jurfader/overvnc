@@ -38,9 +38,12 @@ export async function wsRoutes(app: FastifyInstance, ctx: Ctx) {
           }
           if (host !== req.headers.host) throw new HttpError(403, 'bad_origin');
         }
-        if (!userFromRequest(db, req)) throw new HttpError(401, 'unauthorized');
+        const user = userFromRequest(ctx, req);
+        if (!user) throw new HttpError(401, 'unauthorized');
+        if (user.restriction) throw new HttpError(403, user.restriction);
+        req.user = user;
       },
     },
-    (socket) => hub.attachPanel(socket),
+    (socket, req) => hub.attachPanel(socket, req.user!.id, req.user!),
   );
 }

@@ -25,12 +25,23 @@ cd server && npm test       # testy serwera (node:test)
 cd agent && go test ./...   # testy agenta
 ```
 
-## Funkcje (v0.2.0)
+## Funkcje (v0.3.0)
 
-- rejestracja komputerów tokenem (jednorazowym lub wielokrotnym, z terminem ważności); każdy agent dostaje własny sekret
+**Komputery**
+- rejestracja tokenem (jednorazowym lub wielokrotnym, z terminem ważności, opcjonalnie od razu przypisującym klienta i lokalizację); każdy agent dostaje własny sekret
 - status online/offline na żywo, CPU / RAM / dyski / sieć / czas pracy / zalogowani użytkownicy (co 15 s)
 - inwentarz: system, sprzęt, dyski, interfejsy sieciowe, zainstalowane oprogramowanie (rejestr Windows, `/Applications`, dpkg/rpm/pacman/apk)
-- logowanie administratora (scrypt, sesje httpOnly, limit prób), dziennik zdarzeń
+
+**Organizacja**
+- klienci (firmy) z lokalizacjami, tagi, notatki do komputerów
+- filtry listy (status, klient, lokalizacja, tag, wyszukiwarka) i operacje zbiorcze (przypisanie klienta, tagi)
+
+**Zespół i bezpieczeństwo**
+- role: **Właściciel** (wszystko), **Administrator** (bez zarządzania zespołem), **Technik** (praca zdalna, bez usuwania/ustawień), **Podgląd** (tylko odczyt)
+- zawężenie konta do wybranych klientów — egzekwowane w API, zdarzeniach na żywo i panelu (cudze komputery zwracają 404)
+- 2FA (TOTP, RFC 6238) — obowiązkowe dla właścicieli i administratorów; kody zapasowe; ochrona przed ponownym użyciem kodu; sekret szyfrowany AES-256-GCM kluczem z `DATA_DIR/secret.key`
+- hasła tymczasowe z wymuszoną zmianą, blokada kont, lista aktywnych sesji z wylogowaniem, ochrona ostatniego właściciela
+- dziennik zdarzeń (logowania, zmiany, rejestracje, operacje na komputerach)
 
 ## Uruchomienie lokalne (dev)
 
@@ -75,18 +86,26 @@ vnc.twojadomena.pl {
 }
 ```
 
-Zmienne środowiskowe serwera: `PORT`, `HOST`, `DATA_DIR`, `PANEL_DIR`, `COOKIE_SECURE=1`, `TRUST_PROXY=1`, `ADMIN_USER`/`ADMIN_PASSWORD` (tylko przy pierwszym starcie), `LOG_LEVEL`.
-Zmiana hasła / nowe konto: `npm run cli -- passwd <login>`.
+Zmienne środowiskowe serwera: `PORT`, `HOST`, `DATA_DIR`, `PANEL_DIR`, `COOKIE_SECURE=1`, `TRUST_PROXY=1`, `ADMIN_USER`/`ADMIN_PASSWORD` (tylko przy pierwszym starcie), `LOG_LEVEL`, `REQUIRE_2FA=0` (wyłącza obowiązkowe 2FA — **tylko do developmentu**).
 
-**Kopia zapasowa:** wystarczy katalog `DATA_DIR` (plik `overvnc.db`).
+Narzędzia awaryjne (na serwerze, w katalogu `server/`):
+
+```bash
+npm run cli -- users              # lista kont
+npm run cli -- passwd <login>     # nowe hasło (lub nowe konto właściciela)
+npm run cli -- reset-2fa <login>  # utracony telefon — 2FA do ponownej konfiguracji
+npm run cli -- unlock <login>     # odblokowanie konta
+```
+
+**Kopia zapasowa:** cały katalog `DATA_DIR` — baza `overvnc.db` **oraz** klucz `secret.key`. Bez klucza sekrety 2FA z kopii są nie do odczytania (wtedy pomoże `reset-2fa`). Klucz trzymaj osobno od kopii bazy.
 
 ## Plan
 
 | Etap | Zakres | Status |
 |---|---|---|
 | 0 | Fundament: git, testy, CI, migracje, moduły serwera, protokół poleceń | ✅ v0.2.0 |
-| 1 | Organizacja: klienci, grupy i tagi; zespół z rolami; 2FA | ⏳ |
-| 2 | Praca zdalna: terminal interaktywny, procesy i usługi, zasilanie i Wake-on-LAN | |
+| 1 | Organizacja: klienci, lokalizacje i tagi; zespół z rolami; 2FA | ✅ v0.3.0 |
+| 2 | Praca zdalna: terminal interaktywny, procesy i usługi, zasilanie i Wake-on-LAN | ⏳ |
 | 3 | Menedżer plików | |
 | 4 | Monitoring: historia i wykresy, stan bezpieczeństwa, historia zmian, alerty i powiadomienia | |
 | 5 | Automatyzacja: biblioteka skryptów, zadania zaplanowane, wdrażanie programów i aktualizacji | |
@@ -99,5 +118,5 @@ Zmiana hasła / nowe konto: `npm run cli -- passwd <login>`.
 - Agent wymaga `https://` (wyjątek: `localhost` lub jawne `--insecure` do testów w LAN).
 - Serwer przechowuje wyłącznie skróty (SHA-256 / scrypt) sekretów, tokenów i haseł.
 - Usunięcie komputera w panelu natychmiast unieważnia jego sekret.
-- Przejęcie serwera = dostęp do wszystkich komputerów: aktualizuj system VPS, używaj silnych haseł, (etap 5) włącz 2FA.
+- Przejęcie serwera = dostęp do wszystkich komputerów: aktualizuj system VPS, używaj silnych haseł; 2FA jest obowiązkowe dla właścicieli i administratorów.
 - Monitorowanie komputerów pracowników wymaga ich poinformowania (RODO, art. 22³ Kodeksu pracy).

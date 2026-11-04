@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react';
 
 export interface LiveEvent {
-  type: 'agent_online' | 'agent_offline' | 'agent_updated' | 'agent_metrics' | 'agent_added' | 'agent_removed';
-  id: string;
+  type: 'agent_online' | 'agent_offline' | 'agent_updated' | 'agent_metrics' | 'agent_added' | 'agent_removed' | 'org_changed';
+  id?: string;
   data?: any;
 }
 

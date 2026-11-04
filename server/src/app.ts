@@ -14,6 +14,9 @@ import { agentRoutes } from './routes/agents.ts';
 import { tokenRoutes } from './routes/tokens.ts';
 import { auditRoutes } from './routes/audit.ts';
 import { wsRoutes } from './routes/ws.ts';
+import { userRoutes } from './routes/users.ts';
+import { clientRoutes } from './routes/clients.ts';
+import { loadOrCreateKey } from './crypto.ts';
 
 const CSP = [
   "default-src 'self'",
@@ -38,6 +41,7 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
     config,
     db,
     hub,
+    secretKey: loadOrCreateKey(config.keyFile),
     limits: {
       login: new RateLimiter(10, 15 * 60 * 1000), // 10 prób / 15 min / IP
       enroll: new RateLimiter(20, 15 * 60 * 1000),
@@ -64,6 +68,8 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
   await agentRoutes(app, ctx);
   await tokenRoutes(app, ctx);
   await auditRoutes(app, ctx);
+  await userRoutes(app, ctx);
+  await clientRoutes(app, ctx);
   await wsRoutes(app, ctx);
 
   if (config.panelDir && existsSync(config.panelDir)) {

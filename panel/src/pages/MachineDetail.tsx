@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { ArrowLeft, Clock, Cpu, HardDrive, Info, MemoryStick, Network, Package, Pencil, RefreshCw, Search, Trash2, Users } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, Building2, Clock, Cpu, HardDrive, Info, MemoryStick, Network, Package, Pencil, RefreshCw, Search, Trash2, Users } from 'lucide-react';
 import { api, errorMessage, type Agent, type AgentDetail } from '../api.ts';
-import { Button, CardHead, EmptyState, Meter, Modal, OsBadge, StatTile, Status, toast } from '../components.tsx';
+import { Button, CardHead, ClientLabel, EmptyState, Meter, Modal, OsBadge, StatTile, Status, TagChip, toast } from '../components.tsx';
+import { useMe } from '../state.tsx';
+import { OrganizeModal } from './organize.tsx';
 import { ago, bytes, dateTime, duration, platformLabel, rate } from '../format.ts';
 
 export function MachineDetail({ id, live }: { id: string; live: Agent | undefined }) {
@@ -9,7 +11,8 @@ export function MachineDetail({ id, live }: { id: string; live: Agent | undefine
   const [notFound, setNotFound] = useState(false);
   const [swQuery, setSwQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
-  const [renameOpen, setRenameOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const { can } = useMe();
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   // pobierz szczegóły przy wejściu i za każdym razem, gdy serwer zgłosi nowy inwentarz
@@ -83,15 +86,21 @@ export function MachineDetail({ id, live }: { id: string; live: Agent | undefine
           </div>
         </div>
         <div className="toolbar">
-          <Button icon={Pencil} onClick={() => setRenameOpen(true)}>
-            Zmień nazwę
-          </Button>
-          <Button icon={RefreshCw} onClick={refresh} disabled={!a.online} loading={refreshing}>
-            Odśwież inwentarz
-          </Button>
-          <Button variant="danger" icon={Trash2} onClick={() => setDeleteOpen(true)}>
-            Usuń
-          </Button>
+          {can('agents.manage') && (
+            <Button icon={Pencil} onClick={() => setEditOpen(true)}>
+              Edytuj
+            </Button>
+          )}
+          {can('agents.refresh') && (
+            <Button icon={RefreshCw} onClick={refresh} disabled={!a.online} loading={refreshing} title={a.online ? undefined : 'Komputer jest offline'}>
+              Odśwież inwentarz
+            </Button>
+          )}
+          {can('agents.manage') && (
+            <Button variant="danger" icon={Trash2} onClick={() => setDeleteOpen(true)}>
+              Usuń
+            </Button>
+          )}
         </div>
       </header>
 
@@ -111,6 +120,38 @@ export function MachineDetail({ id, live }: { id: string; live: Agent | undefine
             <Users size={13} /> {m?.activeUsers?.join(', ') || 'nikt nie jest zalogowany'}
           </div>
         </StatTile>
+      </section>
+
+      <section className="glass-card card anim-rise" style={{ animationDelay: '140ms' }}>
+        <CardHead icon={Building2} title="Organizacja">
+          {can('agents.manage') && (
+            <Button size="sm" variant="ghost" icon={Pencil} onClick={() => setEditOpen(true)}>
+              Zmień
+            </Button>
+          )}
+        </CardHead>
+        <dl className="props">
+          <dt>Klient</dt>
+          <dd>
+            <ClientLabel name={a.clientName} color={a.clientColor} site={a.siteName} />
+          </dd>
+          <dt>Tagi</dt>
+          <dd>
+            {a.tags.length ? (
+              <div className="chips">
+                {a.tags.map((t) => (
+                  <TagChip key={t.id} name={t.name} color={t.color} />
+                ))}
+              </div>
+            ) : (
+              <span className="muted small">brak</span>
+            )}
+          </dd>
+          <dt>Notatki</dt>
+          <dd className="pre">{a.notes || <span className="muted small">brak</span>}</dd>
+          <dt>Zarejestrowany</dt>
+          <dd>{dateTime(a.enrolledAt)}</dd>
+        </dl>
       </section>
 
       {!inv ? (
@@ -231,52 +272,9 @@ export function MachineDetail({ id, live }: { id: string; live: Agent | undefine
         </>
       )}
 
-      <RenameModal open={renameOpen} onClose={() => setRenameOpen(false)} id={id} current={a.label} hostname={a.hostname} />
+      <OrganizeModal agent={a} open={editOpen} onClose={() => setEditOpen(false)} />
       <DeleteModal open={deleteOpen} onClose={() => setDeleteOpen(false)} id={id} name={name} />
     </>
-  );
-}
-
-function RenameModal({ open, onClose, id, current, hostname }: { open: boolean; onClose: () => void; id: string; current: string; hostname: string }) {
-  const [value, setValue] = useState(current);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (open) setValue(current);
-  }, [open, current]);
-
-  const save = async (e: FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      await api.setLabel(id, value.trim());
-      toast('Zapisano nazwę');
-      onClose();
-    } catch (err) {
-      toast(errorMessage(err, 'Nie udało się zapisać'), 'err');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal open={open} onClose={onClose}>
-      <form onSubmit={save} style={{ display: 'grid', gap: 16 }}>
-        <h3>Zmień nazwę komputera</h3>
-        <label className="field">
-          Własna nazwa
-          <input className="pole" value={value} onChange={(e) => setValue(e.target.value)} placeholder={hostname} maxLength={100} autoFocus />
-        </label>
-        <p className="small">Pozostaw puste, aby używać nazwy hosta ({hostname}).</p>
-        <div className="okno-actions">
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Anuluj
-          </Button>
-          <Button variant="primary" loading={busy}>
-            Zapisz
-          </Button>
-        </div>
-      </form>
-    </Modal>
   );
 }
 
