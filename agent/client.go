@@ -1,0 +1,183 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"math/rand/v2"
+	"net/http"
+	"time"
+
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
+)
+
+const (
+	metricsInterval   = 15 * time.Second
+	inventoryInterval = 6 * time.Hour
+	pingInterval      = 30 * time.Second
+	maxBackoff        = 60 * time.Second
+)
+
+var errUnauthorized = errors.New("serwer odrzucił dane agenta (agent usunięty z panelu?)")
+
+// Envelope — wspólny format wiadomości z serwerem.
+type Envelope struct {
+	Type string          `json:"type"`
+	ID   string          `json:"id,omitempty"`
+	Data json.RawMessage `json:"data,omitempty"`
+}
+
+// runAgent utrzymuje połączenie z serwerem aż do anulowania ctx.
+func runAgent(ctx context.Context, cfg *Config) {
+	logger.Infof("OVERVNC Agent %s, serwer: %s", version, cfg.ServerURL)
+	backoff := time.Second
+	for {
+		started := time.Now()
+		err := session(ctx, cfg)
+		if ctx.Err() != nil {
+			return
+		}
+		wait := backoff
+		switch {
+		case errors.Is(err, errUnauthorized):
+			logger.Error(err)
+			wait = 5 * time.Minute
+		case err != nil:
+			logger.Warningf("rozłączono: %v", err)
+		}
+		if time.Since(started) > time.Minute {
+			backoff = time.Second // połączenie było stabilne — zacznij od nowa
+		} else {
+			backoff = min(backoff*2, maxBackoff)
+		}
+		// losowy rozrzut, żeby po awarii serwera agenci nie wracali wszyscy naraz
+		wait += time.Duration(rand.Int64N(int64(wait/2) + 1))
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+	}
+}
+
+func session(parent context.Context, cfg *Config) error {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+
+	dialCtx, dialCancel := context.WithTimeout(ctx, 20*time.Second)
+	conn, resp, err := websocket.Dial(dialCtx, wsURL(cfg), &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": {"Bearer " + cfg.AgentID + "." + cfg.AgentSecret}},
+	})
+	dialCancel()
+	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusUnauthorized {
+			return errUnauthorized
+		}
+		return err
+	}
+	defer conn.CloseNow()
+	conn.SetReadLimit(16 << 20)
+	logger.Info("połączono z serwerem")
+
+	send := func(typ string, data any) error {
+		raw, err := json.Marshal(data)
+		if err != nil {
+			return err
+		}
+		wctx, wcancel := context.WithTimeout(ctx, 30*time.Second)
+		defer wcancel()
+		return wsjson.Write(wctx, conn, Envelope{Type: typ, Data: raw})
+	}
+
+	errc := make(chan error, 4)
+	fail := func(err error) {
+		select {
+		case errc <- err:
+		default:
+		}
+	}
+
+	// odczyt poleceń z serwera
+	inventoryNow := make(chan struct{}, 1)
+	go func() {
+		for {
+			var msg Envelope
+			if err := wsjson.Read(ctx, conn, &msg); err != nil {
+				fail(err)
+				return
+			}
+			switch msg.Type {
+			case "refresh_inventory":
+				select {
+				case inventoryNow <- struct{}{}:
+				default:
+				}
+			default:
+				logger.Warningf("nieznane polecenie: %s", msg.Type)
+			}
+		}
+	}()
+
+	// wykrywanie martwego połączenia
+	go func() {
+		t := time.NewTicker(pingInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				pctx, pcancel := context.WithTimeout(ctx, 15*time.Second)
+				err := conn.Ping(pctx)
+				pcancel()
+				if err != nil {
+					fail(errors.New("brak odpowiedzi na ping"))
+					return
+				}
+			}
+		}
+	}()
+
+	// hello + inwentarz, potem cykliczne metryki
+	go func() {
+		if err := send("hello", map[string]any{"version": version, "inventory": collectInventory(ctx)}); err != nil {
+			fail(err)
+			return
+		}
+		mc := newMetricsCollector()
+		metricsT := time.NewTicker(metricsInterval)
+		invT := time.NewTicker(inventoryInterval)
+		defer metricsT.Stop()
+		defer invT.Stop()
+		if err := send("metrics", mc.collect(ctx)); err != nil {
+			fail(err)
+			return
+		}
+		for {
+			var err error
+			select {
+			case <-ctx.Done():
+				return
+			case <-metricsT.C:
+				err = send("metrics", mc.collect(ctx))
+			case <-invT.C:
+				err = send("inventory", collectInventory(ctx))
+			case <-inventoryNow:
+				err = send("inventory", collectInventory(ctx))
+			}
+			if err != nil {
+				fail(err)
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		conn.Close(websocket.StatusNormalClosure, "agent stopping")
+		return nil
+	case err := <-errc:
+		return err
+	}
+}
