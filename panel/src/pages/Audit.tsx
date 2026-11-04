@@ -66,6 +66,8 @@ const ACTIONS: Record<string, [string, Tone]> = {
   'update.rollout': ['Wdrożenie aktualizacji', 'brand'],
   'update.import': ['Import wydania', 'brand'],
   'agent.upgrade': ['Aktualizacja agenta', 'brand'],
+  'desktop.open': ['Otwarcie pulpitu zdalnego', 'warning'],
+  'desktop.close': ['Zamknięcie pulpitu zdalnego', 'neutral'],
 };
 
 export function Audit() {

@@ -1,11 +1,17 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Building2, Check, MapPin, Pencil, Plus, Tag as TagIcon, Trash2, X } from 'lucide-react';
-import { api, errorMessage, type Client, type Tag } from '../api.ts';
+import { api, errorMessage, type Client, type ConsentMode, type Tag } from '../api.ts';
 import { Button, ColorPicker, EmptyState, Field, Modal, PALETTE, TagChip, Tabs, toast } from '../components.tsx';
 import { orgChanged, useMe, useOrg } from '../state.tsx';
 import { plural } from '../format.ts';
 
 type TabKey = 'clients' | 'tags';
+
+const CONSENT_OPTIONS: { value: ConsentMode; label: string; hint: string }[] = [
+  { value: 'notify', label: 'Z powiadomieniem', hint: 'Połączenie od razu, użytkownik widzi na ekranie informację, kto się łączy.' },
+  { value: 'ask', label: 'Z pytaniem o zgodę', hint: 'Użytkownik musi kliknąć „Tak” (30 s). Dla komputerów biurowych.' },
+  { value: 'none', label: 'Bez komunikatu', hint: 'Dla kiosków i komputerów bez obsługi — nic nie wyskakuje na ekranie.' },
+];
 
 /** Wspólne opakowanie: wykonaj, odśwież słowniki, pokaż błąd. */
 async function mutate(fn: () => Promise<unknown>, okText?: string): Promise<boolean> {
@@ -266,6 +272,7 @@ function ClientModal({ client, onClose }: { client: Client | null | undefined; o
   const [name, setName] = useState('');
   const [notes, setNotes] = useState('');
   const [color, setColor] = useState(PALETTE[0]);
+  const [consent, setConsent] = useState<ConsentMode>('notify');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -273,19 +280,20 @@ function ClientModal({ client, onClose }: { client: Client | null | undefined; o
     setName(client?.name ?? '');
     setNotes(client?.notes ?? '');
     setColor(client?.color || PALETTE[0]);
+    setConsent(client?.consentMode ?? 'notify');
   }, [open, client]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
-    const body = { name: name.trim(), notes, color };
+    const body = { name: name.trim(), notes, color, consentMode: consent };
     const ok = await mutate(() => (client ? api.updateClient(client.id, body) : api.createClient(body)), client ? 'Zapisano' : 'Dodano klienta');
     setBusy(false);
     if (ok) onClose();
   };
 
   return (
-    <Modal open={open} onClose={onClose}>
+    <Modal open={open} onClose={onClose} wide>
       <form onSubmit={submit}>
         <h3>{client ? 'Edycja klienta' : 'Nowy klient'}</h3>
         <Field label="Nazwa">
@@ -293,6 +301,19 @@ function ClientModal({ client, onClose }: { client: Client | null | undefined; o
         </Field>
         <Field label="Kolor">
           <ColorPicker value={color} onChange={setColor} />
+        </Field>
+        <Field label="Pulpit zdalny — zgoda użytkownika komputera">
+          <div className="choice-list">
+            {CONSENT_OPTIONS.map((o) => (
+              <label key={o.value} className={`choice ${consent === o.value ? 'on' : ''}`}>
+                <input type="radio" name="consent" checked={consent === o.value} onChange={() => setConsent(o.value)} />
+                <span>
+                  {o.label}
+                  <small>{o.hint}</small>
+                </span>
+              </label>
+            ))}
+          </div>
         </Field>
         <Field label="Notatki" hint="Np. osoba kontaktowa, telefon, godziny pracy.">
           <textarea className="pole" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} />

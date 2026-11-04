@@ -20,6 +20,7 @@ import { remoteRoutes } from './routes/remote.ts';
 import { terminalRoutes } from './routes/terminal.ts';
 import { fileRoutes } from './routes/files.ts';
 import { updateRoutes } from './routes/updates.ts';
+import { desktopRoutes } from './routes/desktop.ts';
 import { UpdateStore } from './updates.ts';
 import { loadOrCreateKey } from './crypto.ts';
 
@@ -97,6 +98,7 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
   await updateRoutes(app, ctx);
   await wsRoutes(app, ctx);
   await terminalRoutes(app, ctx);
+  await desktopRoutes(app, ctx);
 
   if (config.panelDir && existsSync(config.panelDir)) {
     // bez wildcard:false — pliki są serwowane dynamicznie, więc przebudowa panelu nie wymaga restartu

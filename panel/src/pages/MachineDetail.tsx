@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { Activity, ArrowLeft, Building2, CloudDownload, Cog, FolderOpen, LayoutDashboard, TerminalSquare, Clock, Cpu, HardDrive, Info, MemoryStick, Network, Package, Pencil, RefreshCw, Search, Trash2, Users } from 'lucide-react';
+import { Activity, ArrowLeft, Building2, CloudDownload, Cog, MonitorSmartphone, FolderOpen, LayoutDashboard, TerminalSquare, Clock, Cpu, HardDrive, Info, MemoryStick, Network, Package, Pencil, RefreshCw, Search, Trash2, Users } from 'lucide-react';
 import { api, errorMessage, type Agent, type AgentDetail } from '../api.ts';
 import { Button, CardHead, ClientLabel, EmptyState, Meter, Modal, OsBadge, StatTile, Status, TagChip, toast } from '../components.tsx';
 import { useMe } from '../state.tsx';
@@ -11,12 +11,14 @@ import { PowerMenu, WakeButton } from './remote/PowerMenu.tsx';
 import { ago, bytes, dateTime, duration, platformLabel, rate } from '../format.ts';
 
 // xterm.js waży ~400 kB — ładujemy go dopiero przy otwarciu terminala
+const DesktopView = lazy(() => import('./remote/DesktopView.tsx').then((m) => ({ default: m.DesktopView })));
 const TerminalView = lazy(() => import('./remote/TerminalView.tsx').then((m) => ({ default: m.TerminalView })));
 
-export type DetailTab = 'overview' | 'terminal' | 'files' | 'processes' | 'services';
+export type DetailTab = 'overview' | 'desktop' | 'terminal' | 'files' | 'processes' | 'services';
 
 const TABS: { key: DetailTab; label: string; icon: typeof Info }[] = [
   { key: 'overview', label: 'Przegląd', icon: LayoutDashboard },
+  { key: 'desktop', label: 'Pulpit', icon: MonitorSmartphone },
   { key: 'terminal', label: 'Terminal', icon: TerminalSquare },
   { key: 'files', label: 'Pliki', icon: FolderOpen },
   { key: 'processes', label: 'Procesy', icon: Activity },
@@ -152,6 +154,11 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
         </nav>
       )}
 
+      {tab === 'desktop' && remote && (
+        <Suspense fallback={<div className="center-page">Ładowanie…</div>}>
+          <DesktopView agent={a} />
+        </Suspense>
+      )}
       {tab === 'terminal' && remote && (
         <Suspense fallback={<div className="center-page">Ładowanie terminala…</div>}>
           <TerminalView agent={a} />

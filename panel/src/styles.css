@@ -627,3 +627,14 @@ textarea.pole.editor-area { font: 12.5px/1.55 var(--font-mono); height: 58vh; mi
   .files-root { width: auto; white-space: nowrap; }
   .upload-panel { left: 12px; right: 12px; width: auto; }
 }
+
+/* ---------- pulpit zdalny ---------- */
+.desktop-wrap { display: flex; flex-direction: column; overflow: hidden; padding: 0; height: calc(100vh - 250px); min-height: 420px; }
+.desktop-wrap.fullscreen { height: 100vh; border-radius: 0; border: 0; }
+.desktop-stage { position: relative; flex: 1; min-height: 0; display: grid; place-items: center; background: #050508; overflow: hidden; }
+.desktop-canvas { max-width: 100%; max-height: 100%; object-fit: contain; cursor: none; outline: none; image-rendering: auto; }
+.desktop-canvas.view-only { cursor: default; }
+.desktop-canvas:focus { box-shadow: 0 0 0 2px rgb(var(--primary) / 0.6); }
+.desktop-overlay { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 12px; color: #d8d8e6; background: rgb(5 5 8 / 0.8); text-align: center; padding: 20px; }
+.desktop-overlay svg { width: 26px; height: 26px; color: rgb(var(--primary)); }
+.desk-select { width: auto !important; height: 30px !important; font-size: 12.5px; }

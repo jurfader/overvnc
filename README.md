@@ -25,7 +25,7 @@ cd server && npm test       # testy serwera (node:test)
 cd agent && go test ./...   # testy agenta
 ```
 
-## Funkcje (v0.6.0)
+## Funkcje (v0.7.0)
 
 **Komputery**
 - rejestracja tokenem (jednorazowym lub wielokrotnym, z terminem ważności, opcjonalnie od razu przypisującym klienta i lokalizację); każdy agent dostaje własny sekret
@@ -37,6 +37,11 @@ cd agent && go test ./...   # testy agenta
 - filtry listy (status, klient, lokalizacja, tag, wyszukiwarka) i operacje zbiorcze (przypisanie klienta, tagi)
 
 **Praca zdalna** (rola Technik i wyżej, tylko komputery w zakresie konta)
+- **pulpit zdalny (Windows):**
+  - podgląd i sterowanie myszą i klawiaturą (fizyczne klawisze, więc polskie znaki z AltGr działają), wybór monitora i jakości, tryb podglądu wymuszany przez serwer, pełny ekran;
+  - widoczny także ekran blokady i okna UAC (pomocnik działa jako SYSTEM w sesji użytkownika);
+  - wysyłane są tylko zmienione kafelki, a tempo wyznaczają potwierdzenia z przeglądarki (wolne łącze obniża liczbę klatek, a nie zwiększa opóźnienia);
+  - zgoda użytkownika per klient: bez komunikatu (kioski), z powiadomieniem albo z pytaniem Tak/Nie.
 - terminal w przeglądarce (xterm.js; PowerShell/cmd na Windows, zsh/bash/sh na macOS i Linuksie), pełny ekran, wiele sesji, wpis w dzienniku z czasem trwania
 - procesy: lista z CPU i pamięcią, sortowanie, wyszukiwanie, odświeżanie na żywo, zakończenie procesu
 - usługi: start, stop, restart, autostart (Windows, systemd, launchd)
@@ -154,6 +159,7 @@ npm run cli -- unlock <login>     # odblokowanie konta
 | 2 | Praca zdalna: terminal interaktywny, procesy i usługi, zasilanie i Wake-on-LAN | ✅ v0.4.0 |
 | 3 | Menedżer plików | ✅ v0.5.0 |
 | — | Obraz ISO kiosku: rejestracja przy pierwszym uruchomieniu, wykrywanie klonów, podpisane automatyczne aktualizacje z wycofaniem | ✅ v0.6.0 |
+| 6 (część) | Pulpit zdalny dla Windows (zgoda per klient, ekran blokady/UAC) | ✅ v0.7.0 |
 | 4 | Monitoring: historia i wykresy, stan bezpieczeństwa, historia zmian, alerty i powiadomienia | ⏳ |
 | 5 | Automatyzacja: biblioteka skryptów, zadania zaplanowane, wdrażanie programów i aktualizacji | |
 | 6 | Pulpit zdalny + aplikacja w zasobniku (zgoda, czat) | |

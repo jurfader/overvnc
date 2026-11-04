@@ -21,7 +21,7 @@ import (
 	"github.com/kardianos/service"
 )
 
-var version = "0.6.0-dev" // nadpisywane przy budowaniu: -ldflags "-X main.version=..."
+var version = "0.7.0-dev" // nadpisywane przy budowaniu: -ldflags "-X main.version=..."
 
 const serviceName = "overvnc-agent"
 
@@ -102,6 +102,10 @@ func main() {
 	switch cmd {
 	case "version":
 		fmt.Println(version)
+
+	case "desktop-helper":
+		// proces pomocniczy pulpitu zdalnego — uruchamiany przez usługę w sesji użytkownika
+		os.Exit(runDesktopHelper())
 
 	case "enroll":
 		must(enroll(*cfgPath, *serverURL, *token, *insecure, *deferEnroll))

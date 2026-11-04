@@ -12,8 +12,10 @@ const Color = z
   .regex(/^(#[0-9a-fA-F]{6})?$/, 'Kolor w formacie #RRGGBB.')
   .default('');
 const Name = z.string().trim().min(1, 'Nazwa jest wymagana.').max(100);
-const ClientBody = z.object({ name: Name, notes: z.string().max(2000).default(''), color: Color });
-const ClientPatch = z.object({ name: Name.optional(), notes: z.string().max(2000).optional(), color: Color.optional() });
+/** Zgoda na pulpit zdalny: none — bez komunikatu (kioski), notify — informacja na ekranie, ask — pytanie Tak/Nie. */
+const Consent = z.enum(['none', 'notify', 'ask']);
+const ClientBody = z.object({ name: Name, notes: z.string().max(2000).default(''), color: Color, consentMode: Consent.default('notify') });
+const ClientPatch = z.object({ name: Name.optional(), notes: z.string().max(2000).optional(), color: Color.optional(), consentMode: Consent.optional() });
 const SiteBody = z.object({ name: Name });
 const TagBody = z.object({ name: Name.max(40), color: Color });
 const TagPatch = z.object({ name: Name.max(40).optional(), color: Color.optional() });
@@ -55,7 +57,7 @@ export async function clientRoutes(app: FastifyInstance, ctx: Ctx) {
     const where = scopeSql(req.user!, 'c.id');
     const clients = db
       .prepare(
-        `SELECT c.id, c.name, c.notes, c.color, c.created_at AS createdAt,
+        `SELECT c.id, c.name, c.notes, c.color, c.consent_mode AS consentMode, c.created_at AS createdAt,
                 (SELECT COUNT(*) FROM agents a WHERE a.client_id = c.id) AS agentCount
          FROM clients c WHERE ${where.sql} ORDER BY c.name`,
       )
@@ -70,7 +72,10 @@ export async function clientRoutes(app: FastifyInstance, ctx: Ctx) {
     requireGlobal(req);
     const body = parse(ClientBody, req.body);
     const res = uniqueGuard(
-      () => db.prepare('INSERT INTO clients (name, notes, color, created_at) VALUES (?, ?, ?, ?)').run(body.name, body.notes, body.color, Date.now()),
+      () =>
+        db
+          .prepare('INSERT INTO clients (name, notes, color, consent_mode, created_at) VALUES (?, ?, ?, ?, ?)')
+          .run(body.name, body.notes, body.color, body.consentMode, Date.now()),
       'Klient o tej nazwie już istnieje.',
     );
     audit(db, actorOf(req), 'client.create', body.name, null, req.ip);
@@ -81,9 +86,17 @@ export async function clientRoutes(app: FastifyInstance, ctx: Ctx) {
     const { id } = parse(IdParams, req.params);
     assertClientVisible(req.user!, id);
     const body = parse(ClientPatch, req.body);
-    const cur = db.prepare('SELECT name, notes, color FROM clients WHERE id = ?').get(id) as { name: string; notes: string; color: string };
+    const cur = db.prepare('SELECT name, notes, color, consent_mode FROM clients WHERE id = ?').get(id) as {
+      name: string;
+      notes: string;
+      color: string;
+      consent_mode: string;
+    };
     uniqueGuard(
-      () => db.prepare('UPDATE clients SET name = ?, notes = ?, color = ? WHERE id = ?').run(body.name ?? cur.name, body.notes ?? cur.notes, body.color ?? cur.color, id),
+      () =>
+        db
+          .prepare('UPDATE clients SET name = ?, notes = ?, color = ?, consent_mode = ? WHERE id = ?')
+          .run(body.name ?? cur.name, body.notes ?? cur.notes, body.color ?? cur.color, body.consentMode ?? cur.consent_mode, id),
       'Klient o tej nazwie już istnieje.',
     );
     audit(db, actorOf(req), 'client.update', cur.name, body, req.ip);

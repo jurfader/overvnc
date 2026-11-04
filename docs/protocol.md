@@ -92,7 +92,28 @@ W `hello` agent wysyła listę obsługiwanych poleceń. Serwer odrzuca polecenie
 | `fs.read` `{channel, path, zip}` | 0.5.0 | strumień pobierania; katalog jako ZIP w locie (nazwy UTF-8) |
 | `fs.write` `{channel, dir, name, size, overwrite}` + `fs.commit` | 0.5.0 | strumień wysyłania do pliku tymczasowego, zatwierdzenie atomowe |
 
+| `desktop.open` `{channel, monitor, quality, consent, viewer, viewOnly}` | 0.7.0 | pulpit zdalny (Windows); szczegóły niżej |
 | `update.check` | 0.6.0 | natychmiastowe sprawdzenie i instalacja aktualizacji; wynik `{status: up_to_date \| restarting \| skipped \| disabled}` |
+
+### Pulpit zdalny
+
+**Agent.** Usługa w sesji 0 nie widzi ekranu, więc uruchamia `overvnc-agent desktop-helper` jako SYSTEM w sesji konsoli (token z `TokenSessionId`, `CreateProcessAsUser` na `winsta0\default`). Pomocnik przechwytuje ekran przez GDI w trybie Per-Monitor-DPI-V2 i przełącza się na bieżący pulpit wejściowy (ekran blokady/UAC). Wejście wstrzykuje przez `SetCursorPos` i `SendInput` (scancode'y). Usługa i pomocnik komunikują się przez stdin/stdout: `[typ][długość u32][dane]` (`F` klatka, `I` monitory, `L` log, `N` zgoda na klatkę, `E` zdarzenie, `Q` koniec).
+
+**Klatka** (`F`) to `seq u32, szer u16, wys u16, n u16` i `n` × (`x, y, w, h` u16, `długość` u32, JPEG). Wysyłane są tylko kafelki 128×128, które się zmieniły.
+
+**Tempo.** Najwyżej 2 klatki w drodze. Przeglądarka wysyła `{"t":"ack"}` po narysowaniu klatki, serwer zamienia to na ramkę ack dla agenta, a ten pozwala pomocnikowi wysłać następną klatkę (maks. ~15 kl./s).
+
+**Przeglądarka** (`/ws/desktop/:id?quality=low|medium|high&monitor=&viewOnly=0|1`) wysyła zdarzenia JSON:
+- `m` — ruch (x, y w zakresie 0..1 monitora);
+- `b` — przycisk;
+- `w` — kółko;
+- `k` — klawisz (`KeyboardEvent.code`);
+- `cfg` — jakość lub monitor;
+- `kf` — pełna klatka.
+
+Serwer waliduje każde zdarzenie, a w trybie podglądu odrzuca wejście. **Zgoda** wynika z `clients.consent_mode`: `none` | `notify` (WTSSendMessage, bez blokowania) | `ask` (Tak/Nie, 30 s, brak odpowiedzi oznacza odmowę, `consent_denied`).
+
+Na macOS i Linuksie pulpit nie jest jeszcze dostępny. `OVERVNC_DESKTOP_TEST=1` włącza syntetyczny ekran testowy (e2e).
 
 ### Aktualizacje (HTTP, uwierzytelnienie kluczem agenta)
 

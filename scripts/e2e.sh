@@ -31,7 +31,8 @@ echo "✔ logowanie i token"
 ID=$(json .agent_id < "$WORK/agent.json")
 echo "✔ rejestracja ($ID)"
 
-"$WORK/agent" run --config "$WORK/agent.json" >"$WORK/agent.log" 2>&1 &
+# OVERVNC_DESKTOP_TEST=1: syntetyczny ekran testowy (prawdziwe przechwytywanie jest tylko na Windows)
+OVERVNC_DESKTOP_TEST=1 "$WORK/agent" run --config "$WORK/agent.json" >"$WORK/agent.log" 2>&1 &
 PIDS+=($!)
 for _ in $(seq 100); do
   [ "$(curl -sf -b "$J" "$B/api/agents/$ID" | json .online)" = "true" ] && [ "$(curl -sf -b "$J" "$B/api/agents/$ID" | json '.inventory?.host?.hostname ?? ""')" != "" ] && break
@@ -91,6 +92,28 @@ CONFLICT=$(curl -s -b "$J" -X PUT -H 'content-type: application/json' -d "{\"pat
 curl -sf -b "$J" -X POST -H 'content-type: application/json' -d "{\"paths\":[\"$FD/zażółć.bin\",\"$FD/konfig.ini\"]}" "$B/api/agents/$ID/files/delete" >/dev/null || fail "usuwanie plików"
 [ -z "$(ls -A "$FD")" ] || fail "pliki nie zostały usunięte"
 echo "✔ pliki: wysłanie 3,5 MB, pobranie (zgodne bajt w bajt), ZIP, edycja z wykryciem konfliktu, usunięcie"
+
+(cd "$ROOT/server" && SID="$SID" URL="ws://127.0.0.1:$PORT/ws/desktop/$ID" node -e '
+  const { WebSocket } = require("ws");
+  const ws = new WebSocket(process.env.URL, { headers: { cookie: "overvnc_sid=" + process.env.SID } });
+  let info = false, frames = 0;
+  const t = setTimeout(() => { console.error("timeout: info", info, "klatki", frames); process.exit(1); }, 15000);
+  ws.on("message", (m, bin) => {
+    if (!bin) return;
+    const kind = String.fromCharCode(m[0]);
+    if (kind === "I") info = JSON.parse(m.subarray(1)).monitors.length === 2;
+    if (kind === "F") {
+      frames++;
+      ws.send("{\"t\":\"ack\"}");
+      if (frames === 3) ws.send("{\"t\":\"k\",\"code\":\"KeyQ\",\"d\":true}");
+      if (frames === 6 && info) { clearTimeout(t); ws.close(); }
+    }
+  });
+  ws.on("close", () => process.exit(frames >= 6 && info ? 0 : 1));
+') || fail "pulpit zdalny"
+for i in $(seq 50); do grep -q "wejście k code=KeyQ" "$WORK/agent.log" && break; sleep 0.1; done
+grep -q "wejście k code=KeyQ" "$WORK/agent.log" || fail "klawisz nie dotarł do komputera"
+echo "✔ pulpit: monitory, klatki z potwierdzeniami (tempo), klawisz dotarł do komputera"
 
 curl -sf -b "$J" -X DELETE "$B/api/agents/$ID" >/dev/null || fail "usuwanie"
 for _ in $(seq 50); do grep -q "odrzucił" "$WORK/agent.log" && break; sleep 0.1; done

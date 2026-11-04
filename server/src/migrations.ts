@@ -145,4 +145,9 @@ export const MIGRATIONS: string[] = [
     updated_at INTEGER NOT NULL
   );
   `,
+
+  // 4 — pulpit zdalny: tryb zgody użytkownika per klient (none | notify | ask) (v0.7.0)
+  `
+  ALTER TABLE clients ADD COLUMN consent_mode TEXT NOT NULL DEFAULT 'notify';
+  `,
 ];

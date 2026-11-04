@@ -155,11 +155,14 @@ export interface Site {
   agentCount: number;
 }
 
+export type ConsentMode = 'none' | 'notify' | 'ask';
+
 export interface Client {
   id: number;
   name: string;
   notes: string;
   color: string;
+  consentMode: ConsentMode;
   createdAt: number;
   agentCount: number;
   sites: Site[];
@@ -351,8 +354,8 @@ export const api = {
 
   // klienci, lokalizacje, tagi
   clients: () => request<Client[]>('GET', '/api/clients'),
-  createClient: (body: { name: string; notes?: string; color?: string }) => request<{ id: number }>('POST', '/api/clients', body),
-  updateClient: (id: number, body: { name?: string; notes?: string; color?: string }) => request<Ok>('PATCH', `/api/clients/${id}`, body),
+  createClient: (body: { name: string; notes?: string; color?: string; consentMode?: ConsentMode }) => request<{ id: number }>('POST', '/api/clients', body),
+  updateClient: (id: number, body: { name?: string; notes?: string; color?: string; consentMode?: ConsentMode }) => request<Ok>('PATCH', `/api/clients/${id}`, body),
   deleteClient: (id: number) => request<Ok>('DELETE', `/api/clients/${id}`),
   createSite: (clientId: number, name: string) => request<{ id: number }>('POST', `/api/clients/${clientId}/sites`, { name }),
   updateSite: (id: number, name: string) => request<Ok>('PATCH', `/api/sites/${id}`, { name }),
