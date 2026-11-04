@@ -30,6 +30,8 @@ import { kioskRoutes } from './routes/kiosk.ts';
 import { installRoutes } from './routes/install.ts';
 import { jobRoutes } from './routes/jobs.ts';
 import { JobRunner } from './jobs.ts';
+import { Scheduler } from './schedules.ts';
+import { scriptRoutes } from './routes/scripts.ts';
 import { loadOrCreateKey } from './crypto.ts';
 
 const CSP = [
@@ -58,6 +60,7 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
   hub.on('metrics', (id, m) => alerts.onMetrics(id, m));
   hub.on('inventory', (id, inv) => alerts.onInventory(id, inv));
   hub.on('connected', (id) => alerts.onConnected(id));
+  const jobs = new JobRunner(db, hub, (msg) => app.log.warn(msg));
   const ctx: Ctx = {
     config,
     db,
@@ -67,7 +70,8 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
     metrics,
     alerts,
     notifier,
-    jobs: new JobRunner(db, hub, (msg) => app.log.warn(msg)),
+    jobs,
+    scheduler: new Scheduler(db, hub, jobs, (msg) => app.log.warn(msg)),
     limits: {
       login: new RateLimiter(10, 15 * 60 * 1000), // 10 prób / 15 min / IP
       enroll: new RateLimiter(20, 15 * 60 * 1000),
@@ -105,6 +109,7 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
     clearInterval(metricsPrune);
     alerts.close();
     ctx.jobs.close();
+    ctx.scheduler.close();
     notifier.close();
     hub.close();
     ctx.limits.login.close();
@@ -138,6 +143,7 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
   await kioskRoutes(app, ctx);
   await installRoutes(app, ctx);
   await jobRoutes(app, ctx);
+  await scriptRoutes(app, ctx);
 
   if (config.panelDir && existsSync(config.panelDir)) {
     // bez wildcard:false — pliki są serwowane dynamicznie, więc przebudowa panelu nie wymaga restartu

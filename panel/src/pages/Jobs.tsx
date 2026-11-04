@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import {
   ArrowLeft,
   Ban,
+  BookMarked,
+  CalendarClock,
   CheckCircle2,
   CircleDashed,
   Clock,
@@ -11,7 +13,9 @@ import {
   Loader2,
   MessageSquareText,
   Play,
+  Plus,
   Power,
+  Save,
   RefreshCw,
   RotateCcw,
   Search,
@@ -19,8 +23,9 @@ import {
   XCircle,
   type LucideIcon,
 } from 'lucide-react';
-import { api, errorMessage, type Agent, type Job, type JobDetail, type JobInput, type JobKind, type JobTarget, type JobTargetStatus, type ScriptShell } from '../api.ts';
+import { api, errorMessage, type Agent, type Job, type LibraryScript, type JobDetail, type JobInput, type JobKind, type JobTarget, type JobTargetStatus, type ScriptShell } from '../api.ts';
 import { Badge, Button, Checkbox, ClientLabel, EmptyState, Field, Modal, toast } from '../components.tsx';
+import { ScriptsTab, SchedulesTab } from './Automation.tsx';
 import { ago, dateTime, plural } from '../format.ts';
 import { useOrg } from '../state.tsx';
 
@@ -97,6 +102,19 @@ function Progress({ j }: { j: Job }) {
   );
 }
 
+/** Przycisk w nagłówku strony (wspólny dla zakładek): reaguje tylko na kliknięcia po wejściu na zakładkę. */
+export function useHeaderAction(action: number, fn: () => void) {
+  const seen = useRef(action);
+  const cb = useRef(fn);
+  cb.current = fn;
+  useEffect(() => {
+    if (action !== seen.current) {
+      seen.current = action;
+      cb.current();
+    }
+  }, [action]);
+}
+
 function PageHead({ title, sub, children, back }: { title: ReactNode; sub?: ReactNode; children?: ReactNode; back?: boolean }) {
   return (
     <header className="page-head anim-rise">
@@ -116,7 +134,41 @@ function PageHead({ title, sub, children, back }: { title: ReactNode; sub?: Reac
 
 // ---------- lista ----------
 
-export function Jobs({ agents }: { agents: Agent[] }) {
+export type JobsTab = 'history' | 'schedules' | 'scripts';
+
+const JOB_TABS: { key: JobsTab; label: string; icon: LucideIcon; href: string }[] = [
+  { key: 'history', label: 'Historia', icon: ListChecks, href: '#/jobs' },
+  { key: 'schedules', label: 'Harmonogram', icon: CalendarClock, href: '#/jobs/schedules' },
+  { key: 'scripts', label: 'Skrypty', icon: BookMarked, href: '#/jobs/scripts' },
+];
+
+export function Jobs({ agents, tab }: { agents: Agent[]; tab: JobsTab }) {
+  const [action, setAction] = useState(0); // przycisk w nagłówku otwiera okno w zakładce
+  return (
+    <>
+      <PageHead
+        title="Zadania"
+        sub="Skrypty, komunikaty i restarty na wielu komputerach — wykonują się w tle, także po zamknięciu przeglądarki"
+      >
+        <Button variant="primary" icon={tab === 'history' ? Play : Plus} onClick={() => setAction((n) => n + 1)}>
+          {tab === 'history' ? 'Nowe zadanie' : tab === 'schedules' ? 'Nowy harmonogram' : 'Nowy skrypt'}
+        </Button>
+      </PageHead>
+      <nav className="detail-tabs anim-rise" aria-label="Zadania">
+        {JOB_TABS.map((t) => (
+          <a key={t.key} href={t.href} className={`detail-tab ${tab === t.key ? 'on' : ''}`} aria-current={tab === t.key ? 'page' : undefined}>
+            <t.icon /> <span className="tab-label">{t.label}</span>
+          </a>
+        ))}
+      </nav>
+      {tab === 'history' && <JobHistory agents={agents} action={action} />}
+      {tab === 'schedules' && <SchedulesTab agents={agents} action={action} />}
+      {tab === 'scripts' && <ScriptsTab agents={agents} action={action} />}
+    </>
+  );
+}
+
+function JobHistory({ agents, action }: { agents: Agent[]; action: number }) {
   const agentFilter = new URLSearchParams(location.hash.split('?')[1] ?? '').get('agent');
   const [jobs, setJobs] = useState<Job[] | null>(null);
   const [error, setError] = useState('');
@@ -132,28 +184,21 @@ export function Jobs({ agents }: { agents: Agent[] }) {
   useEffect(load, [load]);
   useJobsReload(load);
 
+  useHeaderAction(action, () => setCreating(true));
+
   return (
     <>
-      <PageHead
-        title="Zadania"
-        sub={
-          filtered ? (
-            <>
-              Komputer: <strong>{filtered.label || filtered.hostname}</strong>
-              <a href="#/jobs" className="link-btn">
-                pokaż wszystkie
-              </a>
-            </>
-          ) : (
-            'Skrypty, komunikaty i restarty na wielu komputerach naraz — wykonują się w tle, także po zamknięciu przeglądarki'
-          )
-        }
-      >
-        <Button variant="primary" icon={Play} onClick={() => setCreating(true)}>
-          Nowe zadanie
-        </Button>
-      </PageHead>
-
+      {filtered && (
+        <div className="callout callout-brand anim-rise">
+          <ListChecks />
+          <div>
+            Zadania komputera <strong>{filtered.label || filtered.hostname}</strong> ·{' '}
+            <a href="#/jobs" className="link-btn" style={{ display: 'inline' }}>
+              pokaż wszystkie
+            </a>
+          </div>
+        </div>
+      )}
       {error && <div className="form-error">{error}</div>}
       {jobs && jobs.length === 0 ? (
         <EmptyState icon={ListChecks} title="Brak zadań" text="Uruchom skrypt albo wyślij komunikat na wybrane komputery. Możesz też zaznaczyć komputery na liście i wybrać akcję na dole.">
@@ -199,7 +244,7 @@ export function Jobs({ agents }: { agents: Agent[] }) {
                         <Progress j={j} />
                       </td>
                       <td className="s-meta small ink-2 nowrap" data-label="Utworzone">
-                        {ago(j.createdAt)} · {j.createdBy}
+                        {ago(j.createdAt)} · {j.scheduleId ? 'harmonogram' : j.createdBy}
                       </td>
                     </tr>
                   );
@@ -457,7 +502,7 @@ function OutputModal({ jobId, target, onClose }: { jobId: number; target: JobTar
 
 // ---------- nowe zadanie ----------
 
-const SHELLS: { id: ScriptShell; label: string; family: 'windows' | 'unix' }[] = [
+export const SHELLS: { id: ScriptShell; label: string; family: 'windows' | 'unix' }[] = [
   { id: 'powershell', label: 'PowerShell', family: 'windows' },
   { id: 'cmd', label: 'Wiersz poleceń (cmd)', family: 'windows' },
   { id: 'pwsh', label: 'PowerShell 7 (pwsh)', family: 'windows' },
@@ -465,17 +510,17 @@ const SHELLS: { id: ScriptShell; label: string; family: 'windows' | 'unix' }[] =
   { id: 'bash', label: 'bash (macOS, Linux)', family: 'unix' },
   { id: 'zsh', label: 'zsh (macOS)', family: 'unix' },
 ];
-const TIMEOUTS = [60, 300, 600, 1800, 3600, 7200, 14400];
-const WAITS: { h: number; label: string }[] = [
+export const TIMEOUTS = [60, 300, 600, 1800, 3600, 7200, 14400];
+export const WAITS: { h: number; label: string }[] = [
   { h: 0, label: 'Tylko komputery online — pozostałe pominąć' },
   { h: 1, label: 'Czekać na komputery offline do 1 godz.' },
   { h: 24, label: 'Czekać na komputery offline do 24 godz.' },
   { h: 72, label: 'Czekać na komputery offline do 3 dni' },
   { h: 168, label: 'Czekać na komputery offline do 7 dni' },
 ];
-const MESSAGE_TIMES = [30, 60, 300, 900, 3600];
+export const MESSAGE_TIMES = [30, 60, 300, 900, 3600];
 
-function timeoutLabel(s: number): string {
+export function timeoutLabel(s: number): string {
   return s < 3600 ? `${Math.round(s / 60)} min` : `${s / 3600} godz.`;
 }
 
@@ -485,12 +530,15 @@ export function NewJobModal({
   agents,
   preselected,
   initialKind = 'script',
+  initialScript,
 }: {
   open: boolean;
   onClose: () => void;
   agents: Agent[];
   preselected: string[];
   initialKind?: JobKind;
+  /** wczytany skrypt z biblioteki („Uruchom” w zakładce Skrypty) */
+  initialScript?: LibraryScript;
 }) {
   const [kind, setKind] = useState<JobKind>(initialKind);
   const [ids, setIds] = useState<string[]>(preselected);
@@ -508,7 +556,38 @@ export function NewJobModal({
   const [waitTouched, setWaitTouched] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [library, setLibrary] = useState<LibraryScript[] | null>(null);
+  const [saveName, setSaveName] = useState<string | null>(null);
   const fixedTargets = preselected.length > 0;
+
+  const loadScript = (sc: LibraryScript) => {
+    setShell(sc.shell);
+    setScript(sc.body);
+    setTimeoutSec(sc.timeoutSec);
+    setAsUser(sc.asUser);
+  };
+  const saveToLibrary = async () => {
+    if (!saveName?.trim() || !script.trim()) return;
+    try {
+      const sel = agents.filter((a) => ids.includes(a.id));
+      const clientIds = [...new Set(sel.map((a) => a.clientId))];
+      const sc = await api.createScript({
+        name: saveName.trim(),
+        description: '',
+        shell,
+        body: script,
+        timeoutSec,
+        asUser,
+        // jeden klient wśród wybranych komputerów — skrypt trafia do jego biblioteki; inaczej wspólny
+        clientId: clientIds.length === 1 ? clientIds[0] : null,
+      });
+      setLibrary((l) => [...(l ?? []), sc]);
+      setSaveName(null);
+      toast('Zapisano w bibliotece');
+    } catch (e) {
+      toast(errorMessage(e), 'err');
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -519,6 +598,9 @@ export function NewJobModal({
     // domyślna powłoka wg systemów zaznaczonych komputerów
     const sel = agents.filter((a) => preselected.includes(a.id));
     setShell(sel.length > 0 && sel.every((a) => a.os !== 'windows') ? 'bash' : 'powershell');
+    setSaveName(null);
+    if (initialScript) loadScript(initialScript);
+    api.scripts().then(setLibrary, () => setLibrary([]));
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // restart komputera, który włączy się za dwa dni, rzadko ma sens — domyślnie tylko online
@@ -587,6 +669,25 @@ export function NewJobModal({
 
         {kind === 'script' && (
           <>
+            {library && library.length > 0 && (
+              <Field label="Z biblioteki">
+                <select
+                  className="pole"
+                  value=""
+                  onChange={(e) => {
+                    const sc = library.find((x) => x.id === Number(e.target.value));
+                    if (sc) loadScript(sc);
+                  }}
+                >
+                  <option value="">Wczytaj zapisany skrypt…</option>
+                  {library.map((sc) => (
+                    <option key={sc.id} value={sc.id}>
+                      {sc.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
             <div className="form-2">
               <Field label="Powłoka">
                 <select className="pole" value={shell} onChange={(e) => setShell(e.target.value as ScriptShell)}>
@@ -619,6 +720,35 @@ export function NewJobModal({
                 placeholder={family === 'windows' ? 'Get-Process chrome | Stop-Process -Force' : 'uptime'}
               />
             </Field>
+            {saveName === null ? (
+              <button type="button" className="link-btn" style={{ justifySelf: 'start' }} onClick={() => setSaveName('')} disabled={!script.trim()}>
+                <Save className="inline-icon" /> Zapisz w bibliotece
+              </button>
+            ) : (
+              <div className="inline-form">
+                <input
+                  className="pole"
+                  autoFocus
+                  placeholder="Nazwa skryptu w bibliotece"
+                  value={saveName}
+                  maxLength={100}
+                  onChange={(e) => setSaveName(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Enter zapisuje do biblioteki — nie wysyła całego zadania
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void saveToLibrary();
+                    }
+                  }}
+                />
+                <Button type="button" size="sm" icon={Save} onClick={() => void saveToLibrary()} disabled={!saveName.trim()}>
+                  Zapisz
+                </Button>
+                <Button type="button" size="sm" variant="ghost" onClick={() => setSaveName(null)}>
+                  Anuluj
+                </Button>
+              </div>
+            )}
             <label className={`choice ${asUser ? 'on' : ''}`}>
               <input type="checkbox" className="cb" checked={asUser} onChange={(e) => setAsUser(e.target.checked)} />
               <span>
@@ -687,7 +817,7 @@ export function NewJobModal({
 
         {kind === 'inventory' && <p className="small">Komputery zbiorą na nowo dane o systemie, sprzęcie, oprogramowaniu i licencji Windows.</p>}
 
-        <Field label={fixedTargets ? 'Komputery' : `Komputery (zaznaczono ${n})`}>
+        <Field label={fixedTargets ? 'Komputery' : `Komputery (zaznaczono ${n})`} group>
           {fixedTargets ? (
             <div className="chips">
               {selected.map((a) => (
@@ -733,7 +863,7 @@ export function NewJobModal({
 }
 
 /** Wybór komputerów: wyszukiwanie, klient, „zaznacz widoczne”. */
-function TargetPicker({ agents, ids, onChange }: { agents: Agent[]; ids: string[]; onChange: (ids: string[]) => void }) {
+export function TargetPicker({ agents, ids, onChange }: { agents: Agent[]; ids: string[]; onChange: (ids: string[]) => void }) {
   const { clients } = useOrg();
   const [q, setQ] = useState('');
   const [client, setClient] = useState<number | null>(null);

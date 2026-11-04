@@ -8,6 +8,7 @@ import type { MetricsStore } from './metrics.ts';
 import type { AlertEngine } from './alerts.ts';
 import type { Notifier } from './notify.ts';
 import type { JobRunner } from './jobs.ts';
+import type { Scheduler } from './schedules.ts';
 
 /** Zależności współdzielone przez wszystkie moduły tras. */
 export interface Ctx {
@@ -26,6 +27,8 @@ export interface Ctx {
   notifier: Notifier;
   /** Zadania w tle (skrypty i akcje na wielu komputerach). */
   jobs: JobRunner;
+  /** Harmonogram zadań (dni tygodnia + godzina). */
+  scheduler: Scheduler;
   /** Wysyła „sprawdź aktualizację” do nieaktualnych komputerów (ustawiane przez trasy aktualizacji). */
   rollout?: (ids?: string[]) => number;
   limits: {

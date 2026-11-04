@@ -272,7 +272,16 @@ export function Checkbox({ checked, indeterminate, onChange, label }: { checked:
 }
 
 /** Pole formularza z etykietą i podpowiedzią. */
-export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
+export function Field({ label, hint, children, group }: { label: string; hint?: ReactNode; children: ReactNode; group?: boolean }) {
+  // group: grupa przycisków (dni tygodnia, przełączniki) — <label> przekierowałby kliknięcie w podpis na pierwszy przycisk
+  if (group)
+    return (
+      <div className="field" role="group" aria-label={label}>
+        {label}
+        {children}
+        {hint && <span className="field-hint">{hint}</span>}
+      </div>
+    );
   return (
     <label className="field">
       {label}

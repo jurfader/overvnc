@@ -318,7 +318,7 @@ function MemberModal({
           </Field>
         </div>
 
-        <Field label="Rola">
+        <Field label="Rola" group>
           <div className="choice-list">
             {ROLE_ORDER.map((r) => (
               <label key={r} className={`choice ${role === r ? 'on' : ''}`}>
@@ -332,7 +332,7 @@ function MemberModal({
           </div>
         </Field>
 
-        <Field label="Dostęp do klientów">
+        <Field label="Dostęp do klientów" group>
           <div className="choice-list">
             <label className={`choice ${allClients ? 'on' : ''}`}>
               <input type="radio" name="scope" checked={allClients} onChange={() => setAllClients(true)} />

@@ -243,4 +243,43 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX job_targets_agent ON job_targets(agent_id, status);
   `,
+
+  // 9 — biblioteka skryptów i harmonogram zadań (v0.14.0)
+  `
+  CREATE TABLE scripts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    shell       TEXT NOT NULL,
+    body        TEXT NOT NULL,
+    timeout_sec INTEGER NOT NULL DEFAULT 600,
+    as_user     INTEGER NOT NULL DEFAULT 0,
+    client_id   INTEGER REFERENCES clients(id) ON DELETE CASCADE, -- NULL = wspólny (konta z dostępem do wszystkich)
+    created_by  TEXT NOT NULL,
+    created_at  INTEGER NOT NULL,
+    updated_by  TEXT NOT NULL,
+    updated_at  INTEGER NOT NULL
+  );
+
+  CREATE TABLE schedules (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    kind        TEXT NOT NULL,                  -- script | message | power | inventory
+    params_json TEXT NOT NULL,                  -- script: { scriptId }
+    client_id   INTEGER REFERENCES clients(id) ON DELETE CASCADE, -- zakres harmonogramu; NULL = wszyscy klienci
+    target_type TEXT NOT NULL,                  -- agents | client | tag | all
+    target_json TEXT NOT NULL,                  -- { agentIds } | { tagId }
+    days        INTEGER NOT NULL,               -- maska dni: bit 0 = poniedziałek … bit 6 = niedziela
+    time        TEXT NOT NULL,                  -- HH:MM (czas polski)
+    wait_hours  REAL NOT NULL DEFAULT 1,
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    next_run_at INTEGER,
+    last_run_at INTEGER,
+    last_job_id INTEGER,
+    created_by  TEXT NOT NULL,
+    created_at  INTEGER NOT NULL
+  );
+
+  ALTER TABLE jobs ADD COLUMN schedule_id INTEGER REFERENCES schedules(id) ON DELETE SET NULL;
+  `,
 ];

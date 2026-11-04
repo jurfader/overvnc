@@ -56,6 +56,7 @@ interface JobRow {
   expires_at: number;
   finished_at: number | null;
   canceled_at: number | null;
+  schedule_id: number | null;
 }
 
 /** Tytuł zadania, gdy nie podano własnego. */
@@ -124,6 +125,7 @@ export async function jobRoutes(app: FastifyInstance, ctx: Ctx) {
       expiresAt: j.expires_at,
       finishedAt: j.finished_at,
       canceledAt: j.canceled_at,
+      scheduleId: j.schedule_id,
       counts: cnt,
       total: Object.values(cnt).reduce((a, b) => a + b, 0),
     };

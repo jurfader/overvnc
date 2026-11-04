@@ -482,6 +482,15 @@ export const api = {
   jobOutput: (id: number, agentId: string) => request<{ output: string }>('GET', `/api/jobs/${id}/output/${agentId}`),
   cancelJob: (id: number) => request<Ok>('POST', `/api/jobs/${id}/cancel`, {}),
   retryJob: (id: number) => request<{ id: number }>('POST', `/api/jobs/${id}/retry`, {}),
+  scripts: () => request<LibraryScript[]>('GET', '/api/scripts'),
+  createScript: (b: ScriptInput) => request<LibraryScript>('POST', '/api/scripts', b),
+  updateScript: (id: number, b: ScriptInput) => request<LibraryScript>('PUT', `/api/scripts/${id}`, b),
+  deleteScript: (id: number) => request<Ok>('DELETE', `/api/scripts/${id}`),
+  schedules: () => request<Schedule[]>('GET', '/api/schedules'),
+  createSchedule: (b: ScheduleInput) => request<Schedule>('POST', '/api/schedules', b),
+  updateSchedule: (id: number, b: ScheduleInput) => request<Schedule>('PUT', `/api/schedules/${id}`, b),
+  deleteSchedule: (id: number) => request<Ok>('DELETE', `/api/schedules/${id}`),
+  runSchedule: (id: number) => request<{ jobId: number }>('POST', `/api/schedules/${id}/run`, {}),
 
 };
 
@@ -515,6 +524,7 @@ export interface Job {
   expiresAt: number;
   finishedAt: number | null;
   canceledAt: number | null;
+  scheduleId: number | null;
   counts: Record<JobTargetStatus, number>;
   total: number;
 }
@@ -538,4 +548,60 @@ export interface JobTarget {
 
 export interface JobDetail extends Job {
   targets: JobTarget[];
+}
+
+// ---------- biblioteka skryptów i harmonogram ----------
+
+export interface ScriptInput {
+  name: string;
+  description: string;
+  shell: ScriptShell;
+  body: string;
+  timeoutSec: number;
+  asUser: boolean;
+  clientId: number | null;
+}
+
+export interface LibraryScript extends ScriptInput {
+  id: number;
+  createdBy: string;
+  updatedBy: string;
+  updatedAt: number;
+  usedBy: string[];
+}
+
+export type ScheduleTarget = { type: 'agents'; agentIds: string[] } | { type: 'client' } | { type: 'tag'; tagId: number } | { type: 'all' };
+
+export type ScheduleInput = {
+  name: string;
+  clientId: number | null;
+  target: ScheduleTarget;
+  days: number;
+  time: string;
+  waitHours: number;
+  enabled: boolean;
+} & (
+  | { kind: 'script'; params: { scriptId: number } }
+  | { kind: 'message'; params: { text: string; title?: string; seconds?: number } }
+  | { kind: 'power'; params: { action: 'reboot' | 'shutdown'; delayMinutes?: number; message?: string } }
+  | { kind: 'inventory'; params: Record<string, never> }
+);
+
+export interface Schedule {
+  id: number;
+  name: string;
+  kind: JobKind;
+  params: any;
+  scriptName: string | null;
+  clientId: number | null;
+  target: { type: ScheduleTarget['type']; agentIds?: string[]; tagId?: number; tagName?: string; tagColor?: string };
+  targetCount: number;
+  days: number;
+  time: string;
+  waitHours: number;
+  enabled: boolean;
+  nextRunAt: number | null;
+  lastRunAt: number | null;
+  lastJob: { id: number; finished: boolean; total: number; ok: number } | null;
+  createdBy: string;
 }

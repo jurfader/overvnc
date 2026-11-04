@@ -118,7 +118,7 @@ export function OrganizeModal({ agent, open, onClose }: { agent: Agent; open: bo
           <input className="pole" value={label} onChange={(e) => setLabel(e.target.value)} placeholder={agent.hostname} maxLength={100} autoFocus />
         </Field>
         <PlacementFields clientId={clientId} siteId={siteId} allowNone={me.allClients} onChange={(c, s) => (setClientId(c), setSiteId(s))} />
-        <Field label="Tagi">
+        <Field label="Tagi" group>
           <TagPicker value={tagIds} onChange={setTagIds} />
         </Field>
         <Field label="Notatki" hint="Widoczne dla całego zespołu, np. lokalizacja w biurze, użytkownik, numer inwentarzowy.">

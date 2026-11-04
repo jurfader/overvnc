@@ -83,15 +83,15 @@ export class JobRunner {
   }
 
   /** Tworzy zadanie i od razu wysyła je do komputerów online. */
-  create(input: { kind: JobKind; title: string; params: JobParams; agentIds: string[]; waitMs: number; userId: number; username: string }): number {
+  create(input: { kind: JobKind; title: string; params: JobParams; agentIds: string[]; waitMs: number; userId: number | null; username: string; scheduleId?: number }): number {
     const now = Date.now();
     const ids = [...new Set(input.agentIds)];
     let jobId = 0;
     this.db.exec('BEGIN');
     try {
       const r = this.db
-        .prepare('INSERT INTO jobs (kind, title, params_json, user_id, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(input.kind, input.title, JSON.stringify(input.params), input.userId, input.username, now, now + input.waitMs);
+        .prepare('INSERT INTO jobs (kind, title, params_json, user_id, created_by, created_at, expires_at, schedule_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(input.kind, input.title, JSON.stringify(input.params), input.userId, input.username, now, now + input.waitMs, input.scheduleId ?? null);
       jobId = Number(r.lastInsertRowid);
       const ins = this.db.prepare('INSERT INTO job_targets (job_id, agent_id, run_id) VALUES (?, ?, ?)');
       for (const a of ids) ins.run(jobId, a, randomBytes(12).toString('base64url'));

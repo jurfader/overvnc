@@ -396,7 +396,7 @@ function RuleModal({ rule, onClose, onSaved }: { rule: AlertRule | null | undefi
     <Modal open={open} onClose={onClose} wide>
       <form onSubmit={submit}>
         <h3>{rule ? 'Edycja reguły' : 'Nowa reguła alertu'}</h3>
-        <Field label="Rodzaj">
+        <Field label="Rodzaj" group>
           <div className="choice-list">
             {KIND_OPTIONS.map((o) => (
               <label key={o.value} className={`choice ${f.kind === o.value ? 'on' : ''}`}>

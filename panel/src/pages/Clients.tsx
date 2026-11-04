@@ -306,7 +306,7 @@ function ClientModal({ client, onClose }: { client: Client | null | undefined; o
         <Field label="Kolor">
           <ColorPicker value={color} onChange={setColor} />
         </Field>
-        <Field label="Pulpit zdalny — zgoda użytkownika komputera">
+        <Field label="Pulpit zdalny — zgoda użytkownika komputera" group>
           <div className="choice-list">
             {CONSENT_OPTIONS.map((o) => (
               <label key={o.value} className={`choice ${consent === o.value ? 'on' : ''}`}>
