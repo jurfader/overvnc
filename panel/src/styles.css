@@ -36,6 +36,7 @@
   --glass-border-bright: rgb(255 255 255 / 0.12);
   --bar-bg: rgb(13 13 21 / 0.86); /* menu boczne — kryje samo z siebie */
   --okno-bg: rgb(15 15 24 / 0.97);
+  --okno-solid: rgb(15 15 24);
   --pole-bg: rgb(255 255 255 / 0.05);
   --overlay: rgb(0 0 0 / 0.62);
   --shadow-glass: inset 0 1px 0 rgb(255 255 255 / 0.04), 0 4px 24px rgb(0 0 0 / 0.4);
@@ -82,6 +83,7 @@
   --glass-border-bright: rgb(20 20 40 / 0.15);
   --bar-bg: rgb(255 255 255 / 0.88);
   --okno-bg: rgb(255 255 255 / 0.98);
+  --okno-solid: rgb(255 255 255);
   --pole-bg: rgb(255 255 255 / 0.85);
   --overlay: rgb(20 20 40 / 0.45);
   --shadow-glass: 0 1px 2px rgb(20 20 40 / 0.05), 0 14px 36px -14px rgb(20 20 40 / 0.2);
@@ -343,10 +345,12 @@ dl.props dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
   background: var(--okno-bg); border: 1px solid var(--glass-border-bright);
   box-shadow: var(--shadow-okno); border-radius: var(--radius-lg);
   padding: 24px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px;
+  /* wysokie okno (np. formularz z listą klientów) przewija się w środku — przyciski zostają w zasięgu */
+  max-height: calc(100dvh - 32px); overflow-y: auto; overscroll-behavior: contain;
 }
 .okno h3 { font-size: 17px; }
 .okno p { margin: 0; color: rgb(var(--ink-2)); }
-.okno-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.okno-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; position: sticky; bottom: -24px; padding: 10px 0 24px; margin-bottom: -24px; background: var(--okno-solid); z-index: 2; }
 
 /* ---------- toasty ---------- */
 .toasts { position: fixed; right: 20px; bottom: 20px; z-index: 200; display: grid; gap: 8px; }
@@ -733,8 +737,8 @@ textarea.pole.editor-area { font: 12.5px/1.55 var(--font-mono); height: 58vh; mi
 
   /* okna dialogowe: pełna szerokość, przewijanie treści, przyciski zawsze w zasięgu */
   .okno-tlo { padding: 10px; align-items: end; }
-  .okno { max-height: calc(100dvh - 20px); overflow-y: auto; }
-  .okno-actions { position: sticky; bottom: -1px; padding-top: 10px; background: var(--okno-bg); flex-wrap: wrap; }
+  .okno { max-height: calc(100dvh - 20px); }
+  .okno-actions { flex-wrap: wrap; }
 
   /* zakładki komputera: ikony; podpis tylko przy aktywnej */
   .detail-tab { padding: 10px 11px; gap: 6px; }
