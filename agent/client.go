@@ -74,7 +74,7 @@ func session(parent context.Context, cfg *Config) error {
 	conn.SetReadLimit(16 << 20)
 	logger.Info("połączono z serwerem")
 
-	// coder/websocket pozwala na współbieżne Write, więc odpowiedzi i zdarzenia mogą iść z wielu gorutyn
+	// coder/websocket pozwala na współbieżne Write, więc odpowiedzi, zdarzenia i strumienie mogą iść z wielu gorutyn
 	write := func(env Envelope) error {
 		wctx, wcancel := context.WithTimeout(ctx, 30*time.Second)
 		defer wcancel()
@@ -88,6 +88,19 @@ func session(parent context.Context, cfg *Config) error {
 		return write(Envelope{Type: typ, Data: raw})
 	}
 
+	sess := &sessionIO{
+		writeBinary: func(b []byte) error {
+			wctx, wcancel := context.WithTimeout(ctx, 30*time.Second)
+			defer wcancel()
+			return conn.Write(wctx, websocket.MessageBinary, b)
+		},
+		event:    send,
+		channels: newChannelManager(),
+	}
+	// zerwanie połączenia kończy wszystkie powłoki — nie zostawiamy osieroconych procesów root/SYSTEM
+	defer sess.channels.closeAll()
+	ctx = withSession(ctx, sess)
+
 	errc := make(chan error, 4)
 	fail := func(err error) {
 		select {
@@ -100,10 +113,18 @@ func session(parent context.Context, cfg *Config) error {
 	go func() {
 		sem := make(chan struct{}, maxConcurrentReqs)
 		for {
-			var msg Envelope
-			if err := wsjson.Read(ctx, conn, &msg); err != nil {
+			typ, data, err := conn.Read(ctx)
+			if err != nil {
 				fail(err)
 				return
+			}
+			if typ == websocket.MessageBinary {
+				sess.channels.handleFrame(data)
+				continue
+			}
+			var msg Envelope
+			if err := json.Unmarshal(data, &msg); err != nil {
+				continue
 			}
 			if msg.ID == "" {
 				continue // serwer nie wysyła obecnie zdarzeń bez ID
@@ -149,6 +170,8 @@ func session(parent context.Context, cfg *Config) error {
 			"version":      version,
 			"protocol":     protocolVersion,
 			"capabilities": capabilities(),
+			"shells":       availableShells(),
+			"runAs":        currentUser(),
 			"inventory":    collectInventory(ctx),
 		}
 		if err := send("hello", hello); err != nil {

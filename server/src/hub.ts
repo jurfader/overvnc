@@ -28,6 +28,30 @@ interface AgentConn {
   alive: boolean;
   protocol: number;
   capabilities: string[];
+  shells: string[];
+  runAs: string;
+}
+
+/** Odbiorca strumienia (np. terminal w przeglądarce). */
+export interface ChannelSink {
+  onData(payload: Buffer): void;
+  onClose(info: { reason: 'exited' | 'agent_disconnected' | 'server_closing'; exitCode?: number }): void;
+}
+
+interface ChannelEntry {
+  agentId: string;
+  channel: number;
+  sink: ChannelSink;
+}
+
+const FRAME_DATA = 1;
+
+/** Ramka binarna: [rodzaj u8][kanał u32 BE][dane] — ten sam format co w agent/channels.go. */
+export function encodeFrame(kind: number, channel: number, payload: Buffer): Buffer {
+  const head = Buffer.alloc(5);
+  head[0] = kind;
+  head.writeUInt32BE(channel, 1);
+  return Buffer.concat([head, payload]);
 }
 
 interface Pending {
@@ -51,6 +75,9 @@ export interface AgentSummary {
   online: boolean;
   connectedAt: number | null;
   capabilities: string[];
+  shells: string[];
+  /** konto, na którym działa agent (gdy online) */
+  runAs: string;
   metrics: unknown;
   clientId: number | null;
   clientName: string | null;
@@ -105,6 +132,8 @@ export class Hub {
   private panels = new Set<WebSocket>();
   private pending = new Map<string, Pending>();
   private panelState = new Map<WebSocket, PanelState>();
+  private channels = new Map<string, ChannelEntry>();
+  private nextChannel = 1;
   private db: Db;
   private pingTimer: NodeJS.Timeout;
   private closed = false;
@@ -124,6 +153,7 @@ export class Hub {
       p.reject(new HttpError(503, 'server_closing', 'Serwer jest wyłączany.'));
     }
     this.pending.clear();
+    this.closeChannelsOf(null, 'server_closing');
     for (const conn of this.agents.values()) conn.socket.terminate();
     for (const p of this.panels) p.terminate();
     this.agents.clear();
@@ -137,7 +167,7 @@ export class Hub {
     if (this.closed) return void socket.terminate();
     this.agents.get(agentId)?.socket.close(4000, 'replaced by new connection');
 
-    const conn: AgentConn = { socket, ip, connectedAt: Date.now(), alive: true, protocol: 0, capabilities: [] };
+    const conn: AgentConn = { socket, ip, connectedAt: Date.now(), alive: true, protocol: 0, capabilities: [], shells: [], runAs: '' };
     this.agents.set(agentId, conn);
     this.db.prepare('UPDATE agents SET last_seen = ?, last_ip = ? WHERE id = ?').run(Date.now(), ip, agentId);
     audit(this.db, `agent:${agentId}`, 'agent.connect', agentId, null, ip);
@@ -145,7 +175,8 @@ export class Hub {
     socket.on('pong', () => (conn.alive = true));
     socket.on('message', (raw, isBinary) => {
       conn.alive = true;
-      if (isBinary || this.closed) return; // ramki binarne zarezerwowane na strumienie (pulpit, pliki)
+      if (this.closed) return;
+      if (isBinary) return this.handleAgentFrame(agentId, raw as Buffer);
       let msg: Envelope;
       try {
         msg = JSON.parse(raw.toString());
@@ -158,6 +189,7 @@ export class Hub {
       // zamknięcie starego połączenia po podmianie nie może wyrejestrować nowego
       if (this.closed || this.agents.get(agentId) !== conn) return;
       this.agents.delete(agentId);
+      this.closeChannelsOf(agentId, 'agent_disconnected');
       this.rejectPendingFor(agentId, new HttpError(502, 'agent_disconnected', 'Komputer rozłączył się w trakcie operacji.'));
       this.db.prepare('UPDATE agents SET last_seen = ? WHERE id = ?').run(Date.now(), agentId);
       audit(this.db, `agent:${agentId}`, 'agent.disconnect', agentId, null, ip);
@@ -171,9 +203,12 @@ export class Hub {
     const now = Date.now();
     switch (msg.type) {
       case 'hello': {
-        const d = (msg.data ?? {}) as { version?: string; protocol?: number; capabilities?: unknown; inventory?: Record<string, any> };
+        const d = (msg.data ?? {}) as { version?: string; protocol?: number; capabilities?: unknown; shells?: unknown; runAs?: unknown; inventory?: Record<string, any> };
+        const strings = (v: unknown) => (Array.isArray(v) ? v.filter((c): c is string => typeof c === 'string').slice(0, 100) : []);
         conn.protocol = Number(d.protocol) || 0;
-        conn.capabilities = Array.isArray(d.capabilities) ? d.capabilities.filter((c): c is string => typeof c === 'string') : [];
+        conn.capabilities = strings(d.capabilities);
+        conn.shells = strings(d.shells);
+        conn.runAs = str(d.runAs);
         this.db.prepare('UPDATE agents SET agent_version = ?, last_seen = ? WHERE id = ?').run(str(d.version), now, agentId);
         if (d.inventory) this.storeInventory(agentId, d.inventory);
         this.broadcastAgent(agentId, { type: 'agent_updated', id: agentId, data: this.summary(agentId) });
@@ -187,6 +222,16 @@ export class Hub {
       case 'metrics': {
         this.db.prepare('UPDATE agents SET metrics_json = ?, last_seen = ? WHERE id = ?').run(JSON.stringify(msg.data ?? {}), now, agentId);
         this.broadcastAgent(agentId, { type: 'agent_metrics', id: agentId, data: msg.data });
+        break;
+      }
+      case 'channel.closed': {
+        const d = (msg.data ?? {}) as { channel?: number; exitCode?: number };
+        const key = `${agentId}:${d.channel}`;
+        const entry = this.channels.get(key);
+        if (entry) {
+          this.channels.delete(key);
+          entry.sink.onClose({ reason: 'exited', exitCode: typeof d.exitCode === 'number' ? d.exitCode : undefined });
+        }
         break;
       }
       case 'result':
@@ -240,6 +285,59 @@ export class Hub {
       this.pending.set(id, { agentId, resolve: resolve as (d: unknown) => void, reject, timer });
       conn.socket.send(JSON.stringify({ type, id, data } satisfies Envelope));
     });
+  }
+
+  // ---------- kanały strumieniowe (terminal; później pulpit i pliki) ----------
+
+  /**
+   * Otwiera kanał na agencie. Odbiorca jest rejestrowany PRZED wysłaniem żądania,
+   * bo agent może zacząć nadawać dane, zanim dotrze jego odpowiedź.
+   */
+  async openChannel<T = unknown>(agentId: string, type: string, params: Record<string, unknown>, sink: ChannelSink): Promise<{ channel: number; result: T }> {
+    const channel = this.nextChannel;
+    this.nextChannel = this.nextChannel >= 0xfffffff0 ? 1 : this.nextChannel + 1;
+    const key = `${agentId}:${channel}`;
+    this.channels.set(key, { agentId, channel, sink });
+    try {
+      const result = await this.request<T>(agentId, type, { ...params, channel }, { capability: type, timeoutMs: 20_000 });
+      return { channel, result };
+    } catch (err) {
+      this.channels.delete(key);
+      throw err;
+    }
+  }
+
+  sendChannelData(agentId: string, channel: number, payload: Buffer): boolean {
+    const conn = this.agents.get(agentId);
+    if (!conn || !this.channels.has(`${agentId}:${channel}`)) return false;
+    conn.socket.send(encodeFrame(FRAME_DATA, channel, payload), { binary: true });
+    return true;
+  }
+
+  /** Zamknięcie z inicjatywy serwera/panelu — agent kończy proces po swojej stronie. */
+  closeChannel(agentId: string, channel: number): void {
+    if (!this.channels.delete(`${agentId}:${channel}`)) return;
+    this.request(agentId, 'channel.close', { channel }, { timeoutMs: 10_000 }).catch(() => {});
+  }
+
+  private handleAgentFrame(agentId: string, raw: Buffer): void {
+    if (raw.length < 5 || raw[0] !== FRAME_DATA) return;
+    // klucz zawiera agentId — agent nie może pisać do cudzego kanału
+    this.channels.get(`${agentId}:${raw.readUInt32BE(1)}`)?.sink.onData(raw.subarray(5));
+  }
+
+  private closeChannelsOf(agentId: string | null, reason: 'agent_disconnected' | 'server_closing'): void {
+    for (const [key, entry] of this.channels) {
+      if (agentId !== null && entry.agentId !== agentId) continue;
+      this.channels.delete(key);
+      entry.sink.onClose({ reason });
+    }
+  }
+
+  openChannelCount(agentId?: string): number {
+    let n = 0;
+    for (const e of this.channels.values()) if (!agentId || e.agentId === agentId) n++;
+    return n;
   }
 
   private rejectPendingFor(agentId: string, err: Error): void {
@@ -341,6 +439,8 @@ export class Hub {
       online: !!conn,
       connectedAt: conn?.connectedAt ?? null,
       capabilities: conn?.capabilities ?? [],
+      shells: conn?.shells ?? [],
+      runAs: conn?.runAs ?? '',
       metrics: r.metrics_json ? JSON.parse(r.metrics_json) : null,
       clientId: r.client_id,
       clientName: r.client_name,

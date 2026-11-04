@@ -93,10 +93,18 @@ export class FakeAgent {
   received: any[] = [];
   private waiters: { pred: (m: any) => boolean; resolve: (m: any) => void }[] = [];
   handlers: Record<string, (data: any) => any> = {};
+  frames: { channel: number; payload: Buffer }[] = [];
+  onFrame?: (channel: number, payload: Buffer) => void;
 
   constructor(port: number, agentId: string, secret: string) {
     this.ws = new WebSocket(`ws://127.0.0.1:${port}/ws/agent`, { headers: { Authorization: `Bearer ${agentId}.${secret}` } });
-    this.ws.on('message', (raw) => {
+    this.ws.on('message', (raw, isBinary) => {
+      if (isBinary) {
+        const b = raw as Buffer;
+        this.frames.push({ channel: b.readUInt32BE(1), payload: b.subarray(5) });
+        this.onFrame?.(b.readUInt32BE(1), b.subarray(5));
+        return;
+      }
       const msg = JSON.parse(raw.toString());
       this.received.push(msg);
       const h = msg.id ? this.handlers[msg.type] : undefined;
@@ -121,6 +129,14 @@ export class FakeAgent {
 
   send(msg: unknown): void {
     this.ws.send(JSON.stringify(msg));
+  }
+
+  /** Dane strumienia od agenta (np. wyjście terminala). */
+  sendFrame(channel: number, payload: Buffer | string): void {
+    const head = Buffer.alloc(5);
+    head[0] = 1;
+    head.writeUInt32BE(channel, 1);
+    this.ws.send(Buffer.concat([head, Buffer.from(payload)]));
   }
 
   hello(capabilities: string[] = []): void {

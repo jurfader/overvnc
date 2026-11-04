@@ -52,6 +52,7 @@ func capabilities() []string {
 	for k := range handlers {
 		out = append(out, k)
 	}
+	out = append(out, extraCapabilities()...)
 	slices.Sort(out)
 	return out
 }

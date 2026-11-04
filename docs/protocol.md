@@ -24,7 +24,21 @@ Ramki tekstowe zawierają JSON w jednej kopercie:
 
 Zdarzenia serwer → panel (`/ws/panel`) są filtrowane zakresem klientów zalogowanego konta: `agent_online`, `agent_offline`, `agent_updated`, `agent_metrics`, `agent_added`, `agent_removed` (także gdy komputer wypadnie z zakresu) oraz `org_changed` (zmienili się klienci/lokalizacje/tagi — panel pobiera słowniki ponownie). Zmiana roli lub zakresu konta zamyka jego panel kodem `4003`; panel łączy się ponownie z nowym zakresem.
 
-Ramki binarne są zarezerwowane na strumienie: pulpit zdalny i przesył plików.
+### Ramki binarne (strumienie)
+
+```
+[1 bajt: rodzaj = 1 (dane)][4 bajty: numer kanału, big-endian][dane]
+```
+
+Kanał otwiera serwer poleceniem (np. `term.open` z polem `channel`). Odbiorcę rejestruje **przed** wysłaniem żądania, bo agent może nadawać dane przed odpowiedzią. Ramki z kanałem, który nie należy do nadającego agenta, serwer odrzuca. Koniec strumienia po stronie agenta to zdarzenie `channel.closed { channel, exitCode }`, a zamknięcie z inicjatywy serwera to polecenie `channel.close { channel }`. Zerwanie połączenia kończy wszystkie kanały, a agent zabija wtedy swoje powłoki.
+
+### Terminal w przeglądarce (`/ws/term/:agentId?shell=&cols=&rows=`)
+
+- Wymaga sesji, uprawnienia `agents.remote`, komputera w zakresie konta i komputera online. W przeciwnym razie odpowiedź 401/403/404/409 przed upgrade'em.
+- Przeglądarka wysyła naciśnięcia klawiszy jako ramki binarne (surowe bajty) oraz `{"type":"resize","cols","rows"}` jako tekst.
+- Serwer wysyła wyjście powłoki jako ramki binarne, a sterowanie tekstem: `{"type":"ready","shell"}` oraz `{"type":"closed","message"}`.
+- Kody zamknięcia: `4100` koniec powłoki, `4101` 30 min bezczynności, `4102` komputer się rozłączył, `4103` przeglądarka nie nadąża (bufor > 8 MB), `4400` nie udało się otworzyć.
+- W dzienniku zapisywane są `term.open` i `term.close` (czas trwania, liczba bajtów w obie strony).
 
 ### Zdarzenia agent → serwer (bez `id`)
 
@@ -59,6 +73,17 @@ W `hello` agent wysyła listę obsługiwanych poleceń. Serwer odrzuca polecenie
 | Polecenie | Od wersji | Opis |
 |---|---|---|
 | `inventory.refresh` | 0.2.0 | zbiera i zwraca pełny inwentarz |
+| `term.open` `{channel, cols, rows, shell}` | 0.4.0 | powłoka w PTY (ConPTY na Windows); limit 8 sesji na komputer |
+| `term.resize` `{channel, cols, rows}` | 0.4.0 | zmiana rozmiaru terminala |
+| `channel.close` `{channel}` | 0.4.0 | zamyka kanał (zabija proces) |
+| `proc.list` | 0.4.0 | procesy z CPU (% całej maszyny, z dwóch próbek) i pamięcią |
+| `proc.kill` `{pid, force}` | 0.4.0 | kończy proces; PID 1/4 i sam agent są chronione |
+| `svc.list` | 0.4.0 | usługi: Windows SCM, systemd, launchd (domena system) |
+| `svc.control` `{name, action}` | 0.4.0 | `start`/`stop`/`restart`/`enable`/`disable`; usługa agenta chroniona |
+| `power.action` `{action, delayMinutes, message}` | 0.4.0 | zasilanie; obsługiwane akcje ogłaszane jako `power.<akcja>` |
+| `wol.send` `{macs, broadcasts}` | 0.4.0 | agent-przekaźnik wysyła magiczny pakiet (UDP 9 i 7, SO_BROADCAST) |
+
+W `hello` agent wysyła też `shells` (dostępne powłoki) i `runAs` (konto, na którym działa).
 
 ### Zgodność
 

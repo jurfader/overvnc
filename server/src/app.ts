@@ -16,6 +16,8 @@ import { auditRoutes } from './routes/audit.ts';
 import { wsRoutes } from './routes/ws.ts';
 import { userRoutes } from './routes/users.ts';
 import { clientRoutes } from './routes/clients.ts';
+import { remoteRoutes } from './routes/remote.ts';
+import { terminalRoutes } from './routes/terminal.ts';
 import { loadOrCreateKey } from './crypto.ts';
 
 const CSP = [
@@ -70,7 +72,9 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
   await auditRoutes(app, ctx);
   await userRoutes(app, ctx);
   await clientRoutes(app, ctx);
+  await remoteRoutes(app, ctx);
   await wsRoutes(app, ctx);
+  await terminalRoutes(app, ctx);
 
   if (config.panelDir && existsSync(config.panelDir)) {
     // bez wildcard:false — pliki są serwowane dynamicznie, więc przebudowa panelu nie wymaga restartu

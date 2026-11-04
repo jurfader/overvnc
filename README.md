@@ -25,7 +25,7 @@ cd server && npm test       # testy serwera (node:test)
 cd agent && go test ./...   # testy agenta
 ```
 
-## Funkcje (v0.3.0)
+## Funkcje (v0.4.0)
 
 **Komputery**
 - rejestracja tokenem (jednorazowym lub wielokrotnym, z terminem ważności, opcjonalnie od razu przypisującym klienta i lokalizację); każdy agent dostaje własny sekret
@@ -35,6 +35,13 @@ cd agent && go test ./...   # testy agenta
 **Organizacja**
 - klienci (firmy) z lokalizacjami, tagi, notatki do komputerów
 - filtry listy (status, klient, lokalizacja, tag, wyszukiwarka) i operacje zbiorcze (przypisanie klienta, tagi)
+
+**Praca zdalna** (rola Technik i wyżej, tylko komputery w zakresie konta)
+- terminal w przeglądarce (xterm.js; PowerShell/cmd na Windows, zsh/bash/sh na macOS i Linuksie), pełny ekran, wiele sesji, wpis w dzienniku z czasem trwania
+- procesy: lista z CPU i pamięcią, sortowanie, wyszukiwanie, odświeżanie na żywo, zakończenie procesu
+- usługi: start, stop, restart, autostart (Windows, systemd, launchd)
+- zasilanie: restart / wyłączenie z opóźnieniem i komunikatem dla użytkownika, anulowanie, wylogowanie, blokada ekranu — panel pokazuje tylko akcje obsługiwane przez dany system
+- Wake-on-LAN przez inny włączony komputer z tej samej sieci (ta sama podsieć + to samo łącze lub klient)
 
 **Zespół i bezpieczeństwo**
 - role: **Właściciel** (wszystko), **Administrator** (bez zarządzania zespołem), **Technik** (praca zdalna, bez usuwania/ustawień), **Podgląd** (tylko odczyt)
@@ -105,8 +112,8 @@ npm run cli -- unlock <login>     # odblokowanie konta
 |---|---|---|
 | 0 | Fundament: git, testy, CI, migracje, moduły serwera, protokół poleceń | ✅ v0.2.0 |
 | 1 | Organizacja: klienci, lokalizacje i tagi; zespół z rolami; 2FA | ✅ v0.3.0 |
-| 2 | Praca zdalna: terminal interaktywny, procesy i usługi, zasilanie i Wake-on-LAN | ⏳ |
-| 3 | Menedżer plików | |
+| 2 | Praca zdalna: terminal interaktywny, procesy i usługi, zasilanie i Wake-on-LAN | ✅ v0.4.0 |
+| 3 | Menedżer plików | ⏳ |
 | 4 | Monitoring: historia i wykresy, stan bezpieczeństwa, historia zmian, alerty i powiadomienia | |
 | 5 | Automatyzacja: biblioteka skryptów, zadania zaplanowane, wdrażanie programów i aktualizacji | |
 | 6 | Pulpit zdalny + aplikacja w zasobniku (zgoda, czat) | |

@@ -19,7 +19,7 @@ import (
 	"github.com/kardianos/service"
 )
 
-var version = "0.3.0-dev" // nadpisywane przy budowaniu: -ldflags "-X main.version=..."
+var version = "0.4.0-dev" // nadpisywane przy budowaniu: -ldflags "-X main.version=..."
 
 const serviceName = "overvnc-agent"
 

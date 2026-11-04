@@ -1,18 +1,34 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Building2, Clock, Cpu, HardDrive, Info, MemoryStick, Network, Package, Pencil, RefreshCw, Search, Trash2, Users } from 'lucide-react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { Activity, ArrowLeft, Building2, Cog, LayoutDashboard, TerminalSquare, Clock, Cpu, HardDrive, Info, MemoryStick, Network, Package, Pencil, RefreshCw, Search, Trash2, Users } from 'lucide-react';
 import { api, errorMessage, type Agent, type AgentDetail } from '../api.ts';
 import { Button, CardHead, ClientLabel, EmptyState, Meter, Modal, OsBadge, StatTile, Status, TagChip, toast } from '../components.tsx';
 import { useMe } from '../state.tsx';
 import { OrganizeModal } from './organize.tsx';
+import { ProcessesView } from './remote/ProcessesView.tsx';
+import { ServicesView } from './remote/ServicesView.tsx';
+import { PowerMenu, WakeButton } from './remote/PowerMenu.tsx';
 import { ago, bytes, dateTime, duration, platformLabel, rate } from '../format.ts';
 
-export function MachineDetail({ id, live }: { id: string; live: Agent | undefined }) {
+// xterm.js waży ~400 kB — ładujemy go dopiero przy otwarciu terminala
+const TerminalView = lazy(() => import('./remote/TerminalView.tsx').then((m) => ({ default: m.TerminalView })));
+
+export type DetailTab = 'overview' | 'terminal' | 'processes' | 'services';
+
+const TABS: { key: DetailTab; label: string; icon: typeof Info }[] = [
+  { key: 'overview', label: 'Przegląd', icon: LayoutDashboard },
+  { key: 'terminal', label: 'Terminal', icon: TerminalSquare },
+  { key: 'processes', label: 'Procesy', icon: Activity },
+  { key: 'services', label: 'Usługi', icon: Cog },
+];
+
+export function MachineDetail({ id, live, tab = 'overview' }: { id: string; live: Agent | undefined; tab?: DetailTab }) {
   const [detail, setDetail] = useState<AgentDetail | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [swQuery, setSwQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const { can } = useMe();
+  const remote = can('agents.remote');
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   // pobierz szczegóły przy wejściu i za każdym razem, gdy serwer zgłosi nowy inwentarz
@@ -74,9 +90,7 @@ export function MachineDetail({ id, live }: { id: string; live: Agent | undefine
               </>
             )}
             <OsBadge os={a.os} />
-            <span>
-              {platformLabel(a.os, a.platform)} · {a.arch}
-            </span>
+            <span>{[platformLabel(a.os, a.platform), a.arch].filter(Boolean).join(' · ')}</span>
             <span className="sep" />
             <span className="mono">{a.lastIp ?? '—'}</span>
             <span className="sep" />
@@ -86,6 +100,8 @@ export function MachineDetail({ id, live }: { id: string; live: Agent | undefine
           </div>
         </div>
         <div className="toolbar">
+          {remote && a.online && <PowerMenu agent={a} />}
+          {remote && !a.online && <WakeButton agent={a} />}
           {can('agents.manage') && (
             <Button icon={Pencil} onClick={() => setEditOpen(true)}>
               Edytuj
@@ -104,173 +120,195 @@ export function MachineDetail({ id, live }: { id: string; live: Agent | undefine
         </div>
       </header>
 
-      <section className="grid grid-stats">
-        <StatTile icon={Cpu} label="Procesor" hint={m?.load ? `load ${m.load.join(' / ')}` : `${m?.processes ?? '—'} procesów`}>
-          <Meter value={m?.cpuPercent} />
-        </StatTile>
-        <StatTile icon={MemoryStick} label="Pamięć" hint={`swap ${bytes(m?.swapUsed)}`} delay={40}>
-          <Meter value={m?.memPercent} caption={m ? `${bytes(m.memUsed)} / ${bytes(m.memTotal)}` : undefined} />
-        </StatTile>
-        <StatTile icon={Network} label="Sieć" delay={80}>
-          <div className="stat-value md">↓ {rate(m?.netRxBps)}</div>
-          <div className="stat-value md ink-2">↑ {rate(m?.netTxBps)}</div>
-        </StatTile>
-        <StatTile icon={Clock} label="Czas pracy" value={<span className="md stat-value">{duration(m?.uptime)}</span>} delay={120}>
-          <div className="stat-hint" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Users size={13} /> {m?.activeUsers?.join(', ') || 'nikt nie jest zalogowany'}
-          </div>
-        </StatTile>
-      </section>
+      {remote && (
+        <nav className="detail-tabs anim-rise" aria-label="Widoki komputera">
+          {TABS.map((t) => (
+            <a key={t.key} href={`#/m/${id}${t.key === 'overview' ? '' : '/' + t.key}`} className={`detail-tab ${tab === t.key ? 'on' : ''}`} aria-current={tab === t.key ? 'page' : undefined}>
+              <t.icon /> {t.label}
+            </a>
+          ))}
+        </nav>
+      )}
 
-      <section className="glass-card card anim-rise" style={{ animationDelay: '140ms' }}>
-        <CardHead icon={Building2} title="Organizacja">
-          {can('agents.manage') && (
-            <Button size="sm" variant="ghost" icon={Pencil} onClick={() => setEditOpen(true)}>
-              Zmień
-            </Button>
-          )}
-        </CardHead>
-        <dl className="props">
-          <dt>Klient</dt>
-          <dd>
-            <ClientLabel name={a.clientName} color={a.clientColor} site={a.siteName} />
-          </dd>
-          <dt>Tagi</dt>
-          <dd>
-            {a.tags.length ? (
-              <div className="chips">
-                {a.tags.map((t) => (
-                  <TagChip key={t.id} name={t.name} color={t.color} />
-                ))}
-              </div>
-            ) : (
-              <span className="muted small">brak</span>
-            )}
-          </dd>
-          <dt>Notatki</dt>
-          <dd className="pre">{a.notes || <span className="muted small">brak</span>}</dd>
-          <dt>Zarejestrowany</dt>
-          <dd>{dateTime(a.enrolledAt)}</dd>
-        </dl>
-      </section>
-
-      {!inv ? (
-        <EmptyState icon={Package} title="Brak inwentarza" text="Agent nie przesłał jeszcze danych o systemie." />
-      ) : (
+      {tab === 'terminal' && remote && (
+        <Suspense fallback={<div className="center-page">Ładowanie terminala…</div>}>
+          <TerminalView agent={a} />
+        </Suspense>
+      )}
+      {tab === 'processes' && remote && <ProcessesView agent={a} />}
+      {tab === 'services' && remote && <ServicesView agent={a} />}
+      {(tab === 'overview' || !remote) && (
         <>
-          <section className="grid grid-2 anim-rise" style={{ animationDelay: '160ms' }}>
-            <div className="glass-card card">
-              <CardHead icon={Info} title="System" />
-              <dl className="props">
-                <dt>System</dt>
-                <dd>{platformLabel(a.os, `${inv.host.platform} ${inv.host.platformVersion}`)}</dd>
-                <dt>Jądro</dt>
-                <dd className="mono">{inv.host.kernelVersion}</dd>
-                <dt>Architektura</dt>
-                <dd>{inv.host.arch}</dd>
-                <dt>Uruchomiony</dt>
-                <dd>{dateTime(inv.host.bootTime * 1000)}</dd>
-                {inv.host.virtualization && (
-                  <>
-                    <dt>Wirtualizacja</dt>
-                    <dd>{inv.host.virtualization}</dd>
-                  </>
-                )}
-                <dt>Host ID</dt>
-                <dd className="mono">{inv.host.hostId}</dd>
-                <dt>Inwentarz z</dt>
-                <dd>{dateTime(inv.collectedAt)}</dd>
-              </dl>
+        <section className="grid grid-stats">
+          <StatTile icon={Cpu} label="Procesor" hint={m?.load ? `load ${m.load.join(' / ')}` : `${m?.processes ?? '—'} procesów`}>
+            <Meter value={m?.cpuPercent} />
+          </StatTile>
+          <StatTile icon={MemoryStick} label="Pamięć" hint={`swap ${bytes(m?.swapUsed)}`} delay={40}>
+            <Meter value={m?.memPercent} caption={m ? `${bytes(m.memUsed)} / ${bytes(m.memTotal)}` : undefined} />
+          </StatTile>
+          <StatTile icon={Network} label="Sieć" delay={80}>
+            <div className="stat-value md">↓ {rate(m?.netRxBps)}</div>
+            <div className="stat-value md ink-2">↑ {rate(m?.netTxBps)}</div>
+          </StatTile>
+          <StatTile icon={Clock} label="Czas pracy" value={<span className="md stat-value">{duration(m?.uptime)}</span>} delay={120}>
+            <div className="stat-hint" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Users size={13} /> {m?.activeUsers?.join(', ') || 'nikt nie jest zalogowany'}
             </div>
-            <div className="glass-card card">
-              <CardHead icon={Cpu} title="Sprzęt" />
-              <dl className="props">
-                <dt>Procesor</dt>
-                <dd>{inv.cpu.model || '—'}</dd>
-                <dt>Rdzenie</dt>
-                <dd>
-                  {inv.cpu.cores} rdzeni · {inv.cpu.threads} wątków
-                </dd>
-                <dt>Pamięć RAM</dt>
-                <dd>{bytes(inv.memory.total)}</dd>
-                <dt>Swap</dt>
-                <dd>{bytes(inv.memory.swapTotal)}</dd>
-              </dl>
-            </div>
-          </section>
+          </StatTile>
+        </section>
 
-          <section className="grid grid-2 anim-rise" style={{ animationDelay: '200ms' }}>
-            <div className="glass-card card">
-              <CardHead icon={HardDrive} title="Dyski" />
-              <table className="table compact">
-                <tbody>
-                  {(m?.disks ?? inv.disks ?? []).map((d) => (
-                    <tr key={d.mountpoint}>
-                      <td className="mono">{d.mountpoint}</td>
-                      <td style={{ width: '60%' }}>
-                        <Meter value={d.usedPercent} caption={`${bytes(d.used)} / ${bytes(d.total)}`} />
-                      </td>
-                    </tr>
+        <section className="glass-card card anim-rise" style={{ animationDelay: '140ms' }}>
+          <CardHead icon={Building2} title="Organizacja">
+            {can('agents.manage') && (
+              <Button size="sm" variant="ghost" icon={Pencil} onClick={() => setEditOpen(true)}>
+                Zmień
+              </Button>
+            )}
+          </CardHead>
+          <dl className="props">
+            <dt>Klient</dt>
+            <dd>
+              <ClientLabel name={a.clientName} color={a.clientColor} site={a.siteName} />
+            </dd>
+            <dt>Tagi</dt>
+            <dd>
+              {a.tags.length ? (
+                <div className="chips">
+                  {a.tags.map((t) => (
+                    <TagChip key={t.id} name={t.name} color={t.color} />
                   ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="glass-card card">
-              <CardHead icon={Network} title="Interfejsy sieciowe" />
-              <table className="table compact">
-                <tbody>
-                  {(inv.network ?? []).map((n) => (
-                    <tr key={n.name}>
-                      <td>
-                        <div className="strong">{n.name}</div>
-                        <div className="muted mono">{n.mac || '—'}</div>
-                      </td>
-                      <td className="mono pre">{(n.addrs ?? []).join('\n')}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+                </div>
+              ) : (
+                <span className="muted small">brak</span>
+              )}
+            </dd>
+            <dt>Notatki</dt>
+            <dd className="pre">{a.notes || <span className="muted small">brak</span>}</dd>
+            <dt>Zarejestrowany</dt>
+            <dd>{dateTime(a.enrolledAt)}</dd>
+          </dl>
+        </section>
 
-          <section className="glass-card card anim-rise" style={{ animationDelay: '240ms' }}>
-            <CardHead icon={Package} title={`Oprogramowanie (${inv.software?.length ?? 0})`}>
-              <div className="search" style={{ width: 260 }}>
-                <Search />
-                <input className="pole" placeholder="Szukaj programu…" value={swQuery} onChange={(e) => setSwQuery(e.target.value)} />
-              </div>
-            </CardHead>
-            {inv.softwareError && <div className="form-error">{inv.softwareError}</div>}
-            <div className="scroll">
-              <table className="table compact">
-                <thead className="sticky">
-                  <tr>
-                    <th>Nazwa</th>
-                    <th>Wersja</th>
-                    <th>Wydawca</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {software.map((s, i) => (
-                    <tr key={`${s.name}-${i}`}>
-                      <td>{s.name}</td>
-                      <td className="mono">{s.version}</td>
-                      <td className="muted small">{s.publisher}</td>
-                    </tr>
-                  ))}
-                  {software.length === 0 && (
-                    <tr>
-                      <td colSpan={3} className="center-text">
-                        Brak wyników.
-                      </td>
-                    </tr>
+        {!inv ? (
+          <EmptyState icon={Package} title="Brak inwentarza" text="Agent nie przesłał jeszcze danych o systemie." />
+        ) : (
+          <>
+            <section className="grid grid-2 anim-rise" style={{ animationDelay: '160ms' }}>
+              <div className="glass-card card">
+                <CardHead icon={Info} title="System" />
+                <dl className="props">
+                  <dt>System</dt>
+                  <dd>{platformLabel(a.os, `${inv.host.platform} ${inv.host.platformVersion}`)}</dd>
+                  <dt>Jądro</dt>
+                  <dd className="mono">{inv.host.kernelVersion}</dd>
+                  <dt>Architektura</dt>
+                  <dd>{inv.host.arch}</dd>
+                  <dt>Uruchomiony</dt>
+                  <dd>{dateTime(inv.host.bootTime * 1000)}</dd>
+                  {inv.host.virtualization && (
+                    <>
+                      <dt>Wirtualizacja</dt>
+                      <dd>{inv.host.virtualization}</dd>
+                    </>
                   )}
-                </tbody>
-              </table>
-            </div>
-          </section>
+                  <dt>Host ID</dt>
+                  <dd className="mono">{inv.host.hostId}</dd>
+                  <dt>Inwentarz z</dt>
+                  <dd>{dateTime(inv.collectedAt)}</dd>
+                </dl>
+              </div>
+              <div className="glass-card card">
+                <CardHead icon={Cpu} title="Sprzęt" />
+                <dl className="props">
+                  <dt>Procesor</dt>
+                  <dd>{inv.cpu.model || '—'}</dd>
+                  <dt>Rdzenie</dt>
+                  <dd>
+                    {inv.cpu.cores} rdzeni · {inv.cpu.threads} wątków
+                  </dd>
+                  <dt>Pamięć RAM</dt>
+                  <dd>{bytes(inv.memory.total)}</dd>
+                  <dt>Swap</dt>
+                  <dd>{bytes(inv.memory.swapTotal)}</dd>
+                </dl>
+              </div>
+            </section>
+
+            <section className="grid grid-2 anim-rise" style={{ animationDelay: '200ms' }}>
+              <div className="glass-card card">
+                <CardHead icon={HardDrive} title="Dyski" />
+                <table className="table compact">
+                  <tbody>
+                    {(m?.disks ?? inv.disks ?? []).map((d) => (
+                      <tr key={d.mountpoint}>
+                        <td className="mono">{d.mountpoint}</td>
+                        <td style={{ width: '60%' }}>
+                          <Meter value={d.usedPercent} caption={`${bytes(d.used)} / ${bytes(d.total)}`} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="glass-card card">
+                <CardHead icon={Network} title="Interfejsy sieciowe" />
+                <table className="table compact">
+                  <tbody>
+                    {(inv.network ?? []).map((n) => (
+                      <tr key={n.name}>
+                        <td>
+                          <div className="strong">{n.name}</div>
+                          <div className="muted mono">{n.mac || '—'}</div>
+                        </td>
+                        <td className="mono pre">{(n.addrs ?? []).join('\n')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section className="glass-card card anim-rise" style={{ animationDelay: '240ms' }}>
+              <CardHead icon={Package} title={`Oprogramowanie (${inv.software?.length ?? 0})`}>
+                <div className="search" style={{ width: 260 }}>
+                  <Search />
+                  <input className="pole" placeholder="Szukaj programu…" value={swQuery} onChange={(e) => setSwQuery(e.target.value)} />
+                </div>
+              </CardHead>
+              {inv.softwareError && <div className="form-error">{inv.softwareError}</div>}
+              <div className="scroll">
+                <table className="table compact">
+                  <thead className="sticky">
+                    <tr>
+                      <th>Nazwa</th>
+                      <th>Wersja</th>
+                      <th>Wydawca</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {software.map((s, i) => (
+                      <tr key={`${s.name}-${i}`}>
+                        <td>{s.name}</td>
+                        <td className="mono">{s.version}</td>
+                        <td className="muted small">{s.publisher}</td>
+                      </tr>
+                    ))}
+                    {software.length === 0 && (
+                      <tr>
+                        <td colSpan={3} className="center-text">
+                          Brak wyników.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </>
+        )}
         </>
       )}
+
 
       <OrganizeModal agent={a} open={editOpen} onClose={() => setEditOpen(false)} />
       <DeleteModal open={deleteOpen} onClose={() => setDeleteOpen(false)} id={id} name={name} />

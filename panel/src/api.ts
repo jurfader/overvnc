@@ -38,6 +38,10 @@ export interface Agent {
   metrics: Metrics | null;
   /** polecenia obsługiwane przez połączonego agenta (pusta lista, gdy offline) */
   capabilities: string[];
+  /** powłoki dostępne na komputerze (gdy online) */
+  shells: string[];
+  /** konto, na którym działa agent, np. root lub NT AUTHORITY\\SYSTEM */
+  runAs: string;
   clientId: number | null;
   clientName: string | null;
   clientColor: string | null;
@@ -75,6 +79,29 @@ export interface Inventory {
 export interface AgentDetail extends Agent {
   inventory: Inventory | null;
 }
+
+export interface ProcInfo {
+  pid: number;
+  ppid: number;
+  name: string;
+  user: string;
+  cmdline: string;
+  cpu: number;
+  memRss: number;
+  memPercent: number;
+  started: number;
+}
+
+export interface ServiceInfo {
+  name: string;
+  displayName: string;
+  status: 'running' | 'stopped' | 'starting' | 'stopping' | 'failed' | 'other';
+  startType: 'auto' | 'manual' | 'disabled' | 'static' | '';
+  description?: string;
+}
+
+export type PowerAction = 'reboot' | 'shutdown' | 'cancel' | 'logoff' | 'lock';
+export type ServiceAction = 'start' | 'stop' | 'restart' | 'enable' | 'disable';
 
 export interface Site {
   id: number;
@@ -244,6 +271,17 @@ export const api = {
     request<{ updated: number }>('POST', '/api/agents/bulk', body),
   refreshInventory: (id: string) => request<Ok>('POST', `/api/agents/${id}/refresh`, {}),
   deleteAgent: (id: string) => request<Ok>('DELETE', `/api/agents/${id}`),
+
+  // praca zdalna
+  processes: (id: string) => request<ProcInfo[]>('GET', `/api/agents/${id}/processes`),
+  killProcess: (id: string, pid: number, force: boolean, name: string) =>
+    request<Ok>('POST', `/api/agents/${id}/processes/${pid}/kill`, { force, name }),
+  services: (id: string) => request<ServiceInfo[]>('GET', `/api/agents/${id}/services`),
+  controlService: (id: string, name: string, action: ServiceAction) =>
+    request<Ok>('POST', `/api/agents/${id}/services/${encodeURIComponent(name)}/${action}`, {}),
+  power: (id: string, action: PowerAction, delayMinutes = 0, message = '') => request<Ok>('POST', `/api/agents/${id}/power`, { action, delayMinutes, message }),
+  wakeInfo: (id: string) => request<{ possible: boolean; reason: 'no_mac' | 'no_relay' | null; relay: { id: string; name: string } | null; macs: string[] }>('GET', `/api/agents/${id}/wake`),
+  wake: (id: string) => request<{ ok: true; relay: { id: string; name: string } }>('POST', `/api/agents/${id}/wake`, {}),
 
   // klienci, lokalizacje, tagi
   clients: () => request<Client[]>('GET', '/api/clients'),

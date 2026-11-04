@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Ctx } from '../context.ts';
 import { audit } from '../db.ts';
 import { HttpError } from '../errors.ts';
@@ -28,16 +28,7 @@ export async function wsRoutes(app: FastifyInstance, ctx: Ctx) {
     {
       websocket: true,
       preValidation: async (req) => {
-        const origin = req.headers.origin;
-        if (origin) {
-          let host: string | null = null;
-          try {
-            host = new URL(origin).host;
-          } catch {
-            /* nieprawidłowy Origin */
-          }
-          if (host !== req.headers.host) throw new HttpError(403, 'bad_origin');
-        }
+        checkOrigin(req);
         const user = userFromRequest(ctx, req);
         if (!user) throw new HttpError(401, 'unauthorized');
         if (user.restriction) throw new HttpError(403, user.restriction);
@@ -46,4 +37,17 @@ export async function wsRoutes(app: FastifyInstance, ctx: Ctx) {
     },
     (socket, req) => hub.attachPanel(socket, req.user!.id, req.user!),
   );
+}
+
+/** Ochrona przed cross-site WebSocket hijacking: Origin (jeśli jest) musi wskazywać ten sam host. */
+export function checkOrigin(req: FastifyRequest): void {
+  const origin = req.headers.origin;
+  if (!origin) return;
+  let host: string | null = null;
+  try {
+    host = new URL(origin).host;
+  } catch {
+    /* nieprawidłowy Origin */
+  }
+  if (host !== req.headers.host) throw new HttpError(403, 'bad_origin');
 }
