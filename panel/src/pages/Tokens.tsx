@@ -96,10 +96,18 @@ export function Tokens() {
         <section className="glass-card card highlight anim-pop" style={{ display: 'grid', gap: 16 }}>
           <CardHead icon={Terminal} title="2. Zainstaluj agenta na komputerze" />
           <p className="ink-2" style={{ margin: 0 }}>
-            Token jest widoczny <strong>tylko teraz</strong>. Pobierz plik agenta dla systemu komputera i uruchom polecenie w jego katalogu.
+            Token jest widoczny <strong>tylko teraz</strong>. Wklej polecenie na komputerze — pobierze najnowszego agenta dla jego systemu, sprawdzi sumę kontrolną,
+            zainstaluje usługę uruchamianą razem z systemem i zarejestruje komputer. Ponowne uruchomienie na tym samym komputerze tylko zaktualizuje agenta.
           </p>
-          <Cmd icon={Monitor} title="Windows — PowerShell jako Administrator" cmd={`.\\overvnc-agent.exe ${args}`} />
-          <Cmd icon={Laptop} title="macOS / Linux — terminal" cmd={`sudo ./overvnc-agent ${args}`} />
+          <Cmd icon={Monitor} title="Windows — PowerShell jako Administrator" cmd={`$env:OVERVNC_TOKEN='${created}'; irm ${server}/install.ps1 | iex`} />
+          <Cmd icon={Laptop} title="macOS / Linux — terminal" cmd={`curl -fsSL ${server}/install.sh | sudo OVERVNC_TOKEN='${created}' sh`} />
+          <details className="manual-install">
+            <summary>Ręcznie — z pobranym plikiem agenta (np. komputer bez dostępu do serwera przy instalacji)</summary>
+            <div style={{ display: 'grid', gap: 12, marginTop: 12 }}>
+              <Cmd icon={Monitor} title="Windows — w katalogu z overvnc-agent.exe" cmd={`.\\overvnc-agent.exe ${args}`} />
+              <Cmd icon={Laptop} title="macOS / Linux — w katalogu z overvnc-agent" cmd={`sudo ./overvnc-agent ${args}`} />
+            </div>
+          </details>
           {insecure && (
             <div className="callout callout-warning">
               <AlertTriangle /> Połączenie bez HTTPS. Używaj tylko do testów w sieci lokalnej.

@@ -863,3 +863,6 @@ textarea.pole.editor-area { font: 12.5px/1.55 var(--font-mono); height: 58vh; mi
 .win-head { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: rgb(var(--ink-2)); text-transform: uppercase; letter-spacing: 0.04em; }
 .win-head svg { width: 15px; height: 15px; color: rgb(var(--primary)); }
 .win-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.manual-install summary { cursor: pointer; font-size: 13px; color: rgb(var(--ink-2)); }
+.manual-install summary:hover { color: rgb(var(--ink)); }
+.cmd-row code { min-width: 0; }

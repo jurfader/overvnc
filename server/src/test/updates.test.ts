@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -197,4 +197,38 @@ test('aktualizacja po połączeniu: nieaktualny komputer, który był offline pr
   await stary.waitFor((m) => m.type === 'update.check', 3000);
   await new Promise((r) => setTimeout(r, 200));
   assert.ok(!aktualny.received.some((m) => m.type === 'update.check'), 'aktualny komputer nie dostaje polecenia');
+});
+
+test('instalacja jedną komendą: skrypty i binarka tylko z ważnym tokenem (nagłówek, nie adres)', async (t) => {
+  const k = keypair();
+  const s = await setup({ releasePublicKey: k.pub });
+  t.after(s.close);
+  const c = await s.login();
+  const ps1 = await s.app.inject({ url: '/install.ps1', headers: { host: 'vnc.example.com' } });
+  assert.equal(ps1.statusCode, 200);
+  assert.match(ps1.body, /\$server = 'http:\/\/vnc\.example\.com'/);
+  assert.match(ps1.body, /X-Enroll-Token/);
+  assert.ok(!ps1.body.includes('__SERVER__'));
+  const sh = await s.app.inject({ url: '/install.sh', headers: { host: 'vnc.example.com' } });
+  assert.match(sh.body, /SERVER='http:\/\/vnc\.example\.com'/);
+  assert.match(sh.body, /TOKEN="\$\{OVERVNC_TOKEN:-\}"/);
+
+  const { token } = (await s.app.inject({ method: 'POST', url: '/api/enroll-tokens', cookies: c, payload: { label: 'inst', maxUses: 1 } })).json();
+  const get = (tok?: string) => s.app.inject({ url: '/api/install/agent/windows-amd64', headers: tok ? { 'x-enroll-token': tok } : {} });
+  // brak wydania na serwerze
+  assert.equal((await get(token)).statusCode, 404);
+  await s.ctx.updates.importDir(makeRelease('0.12.0', k.pem));
+  assert.equal((await get()).statusCode, 403, 'bez tokenu');
+  assert.equal((await get('ovnc_zly')).statusCode, 403, 'zły token');
+  const ok = await get(token);
+  assert.equal(ok.statusCode, 200);
+  assert.equal(ok.body, 'binarka windows-amd64 0.12.0');
+  assert.equal(ok.headers['x-agent-version'], '0.12.0');
+  assert.equal(ok.headers['x-sha256'], createHash('sha256').update(ok.rawPayload).digest('hex'));
+  assert.equal((await s.app.inject({ url: '/api/install/agent/plan9-mips', headers: { 'x-enroll-token': token } })).statusCode, 400);
+  // pobranie nie zużywa tokenu — rejestracja nadal działa
+  const enroll = await s.app.inject({ method: 'POST', url: '/api/agent/enroll', payload: { token, hostname: 'nowy-pc' } });
+  assert.equal(enroll.statusCode, 200);
+  // po zużyciu (maxUses: 1) — pobranie odrzucone
+  assert.equal((await get(token)).statusCode, 403, 'token wykorzystany');
 });

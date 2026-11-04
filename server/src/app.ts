@@ -27,6 +27,7 @@ import { AlertEngine } from './alerts.ts';
 import { Notifier } from './notify.ts';
 import { alertRoutes } from './routes/alerts.ts';
 import { kioskRoutes } from './routes/kiosk.ts';
+import { installRoutes } from './routes/install.ts';
 import { loadOrCreateKey } from './crypto.ts';
 
 const CSP = [
@@ -131,6 +132,7 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
   await desktopRoutes(app, ctx);
   await alertRoutes(app, ctx);
   await kioskRoutes(app, ctx);
+  await installRoutes(app, ctx);
 
   if (config.panelDir && existsSync(config.panelDir)) {
     // bez wildcard:false — pliki są serwowane dynamicznie, więc przebudowa panelu nie wymaga restartu
