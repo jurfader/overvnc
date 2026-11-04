@@ -108,6 +108,10 @@ func main() {
 	case "version":
 		fmt.Println(version)
 
+	case "desktop-overlay":
+		// ramka „Aktywne Wsparcie Techniczne” — proces użytkownika uruchamiany przez agenta na czas sesji pulpitu
+		os.Exit(runOverlayProcess(fs.Arg(0)))
+
 	case "desktop-helper":
 		// proces pomocniczy pulpitu zdalnego — uruchamiany przez usługę w sesji użytkownika
 		if fs.Arg(0) == "snapshot" {
@@ -118,8 +122,6 @@ func main() {
 			switch {
 			case a == "gdi":
 				_ = os.Setenv("OVERVNC_CAPTURE", "gdi") // po awarii DXGI w tej instancji agenta
-			case strings.HasPrefix(a, "overlay="):
-				helperOverlay, helperOverlayName = true, strings.TrimPrefix(a, "overlay=")
 			}
 		}
 		os.Exit(runDesktopHelper())

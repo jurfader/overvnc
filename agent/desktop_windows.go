@@ -352,10 +352,9 @@ var (
 	})
 )
 
-// newDesktopBackend: live=true — sesja pulpitu (DXGI z zapasowym GDI), false — pojedynczy zrzut (GDI).
-func newDesktopBackend(live bool) (desktopBackend, error) {
-	// fizyczne piksele na ekranach z powiększeniem (125%, 150%…) — inaczej obraz i kliknięcia się rozjadą
-	// SetProcessDpiAwarenessContext istnieje od Windows 10 1703 — wywołanie brakującej funkcji kończy się paniką
+// setDpiAware — fizyczne piksele na ekranach z powiększeniem (125%, 150%…) — inaczej obraz i kliknięcia się rozjadą.
+// SetProcessDpiAwarenessContext istnieje od Windows 10 1703 — wywołanie brakującej funkcji kończy się paniką.
+func setDpiAware() {
 	perMonitor := false
 	if procSetDpiAwarenessContext.Find() == nil {
 		r, _, _ := procSetDpiAwarenessContext.Call(^uintptr(3)) // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
@@ -364,6 +363,11 @@ func newDesktopBackend(live bool) (desktopBackend, error) {
 	if !perMonitor && procSetProcessDPIAware.Find() == nil {
 		_, _, _ = procSetProcessDPIAware.Call()
 	}
+}
+
+// newDesktopBackend: live=true — sesja pulpitu (DXGI z zapasowym GDI), false — pojedynczy zrzut (GDI).
+func newDesktopBackend(live bool) (desktopBackend, error) {
+	setDpiAware()
 	b := &gdiBackend{drawCursorOn: true}
 	b.switchDesktop()
 	if !live || os.Getenv("OVERVNC_CAPTURE") == "gdi" {

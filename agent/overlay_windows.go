@@ -5,11 +5,14 @@ package main
 import (
 	"fmt"
 	"image"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -156,12 +159,12 @@ func (l *layerWin) excludeFromCapture() string {
 	r2, _, e2 := procGetWindowDisplayAffinity.Call(l.hwnd, uintptr(unsafe.Pointer(&got)))
 	res := fmt.Sprintf("%dx%d set=%d", l.w, l.h, r)
 	if r == 0 {
-		res += fmt.Sprintf(" (%v)", e)
+		res += fmt.Sprintf(" err=%d", e) // numer zamiast opisu — opis jest w języku systemu (krzaki w konsoli)
 	}
 	if r2 != 0 {
 		res += fmt.Sprintf(" affinity=%#x", got)
 	} else {
-		res += fmt.Sprintf(" get-failed (%v)", e2)
+		res += fmt.Sprintf(" get-failed err=%d", e2)
 	}
 	return res
 }
@@ -169,7 +172,7 @@ func (l *layerWin) excludeFromCapture() string {
 // writeOverlayDiag — wynik ukrywania ramki przed przechwytywaniem (C:\ProgramData\OVERVNC\overlay.log).
 func writeOverlayDiag(lines []string) {
 	v := windows.RtlGetVersion()
-	head := fmt.Sprintf("%s  Windows %d.%d.%d\r\n", time.Now().Format(time.RFC3339), v.MajorVersion, v.MinorVersion, v.BuildNumber)
+	head := fmt.Sprintf("%s  Windows %d.%d.%d  proces ramki: uzytkownik\r\n", time.Now().Format(time.RFC3339), v.MajorVersion, v.MinorVersion, v.BuildNumber)
 	_ = os.WriteFile(filepath.Join(os.Getenv("ProgramData"), "OVERVNC", "overlay.log"), []byte(head+strings.Join(lines, "\r\n")+"\r\n"), 0o644)
 }
 
@@ -268,25 +271,28 @@ func (s *overlayState) build(screenDC uintptr, name string, ms []MonitorInfo) {
 	}
 }
 
-// startSupportOverlay uruchamia nakładkę w osobnym wątku systemowym (z własną pętlą komunikatów).
-func startSupportOverlay(name string) {
+// runOverlayProcess — proces „desktop-overlay” uruchomiony przez agenta jako zalogowany użytkownik.
+// Okna procesu SYSTEM przeniesionego do sesji użytkownika nie mogą być wyłączone z przechwytywania
+// (SetWindowDisplayAffinity zwraca błąd 8), a okna użytkownika — tak. Kończy się, gdy agent zamknie stdin.
+func runOverlayProcess(name string) int {
+	runtime.LockOSThread()
+	setDpiAware()
 	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				helperLogHook("nakładka wsparcia: błąd wewnętrzny")
-			}
-		}()
-		runtime.LockOSThread()
-		// zawsze zwykły pulpit użytkownika — wątek główny pomocnika przełącza się na ekran blokady/UAC
-		if name16, err := windows.UTF16PtrFromString("Default"); err == nil {
-			if h, _, _ := procOpenDesktopW.Call(uintptr(unsafe.Pointer(name16)), 0, 0, 0x01FF /* DESKTOP_ALL */); h != 0 {
-				_, _, _ = procSetThreadDesktop.Call(h)
-			}
-		}
-		registerOverlayClass()
-		screenDC, _, _ := procGetDC.Call(0)
-		defer procReleaseDC.Call(0, screenDC)
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		os.Exit(0)
+	}()
+	runOverlayLoop(name, func(lines []string) {
+		_, _ = os.Stdout.WriteString(strings.Join(lines, "\n") + "\n")
+	})
+	return 0
+}
 
+// runOverlayLoop rysuje nakładkę na bieżącym (przypiętym) wątku, do końca procesu.
+func runOverlayLoop(name string, diagOut func([]string)) {
+	registerOverlayClass()
+	screenDC, _, _ := procGetDC.Call(0)
+	defer procReleaseDC.Call(0, screenDC)
+	{
 		var st overlayState
 		st.build(screenDC, name, listMonitorsNow())
 		start := time.Now()
@@ -347,7 +353,7 @@ func startSupportOverlay(name string) {
 					st.notch.show()
 					diag = append(diag, "notch "+st.notch.excludeFromCapture())
 				}
-				writeOverlayDiag(diag)
+				diagOut(diag)
 				shown = true
 			}
 			// inne okna „zawsze na wierzchu” (np. przeglądarka kiosku) nie mogą przykryć ramki
@@ -366,5 +372,88 @@ func startSupportOverlay(name string) {
 			}
 			time.Sleep(overlayFrame)
 		}
+	}
+}
+
+// overlayProc — proces ramki w sesji użytkownika; stop() zamyka go razem z sesją pulpitu.
+type overlayProc struct {
+	proc windows.Handle
+	in   *os.File
+	once sync.Once
+}
+
+func (o *overlayProc) stop() {
+	o.once.Do(func() {
+		_ = o.in.Close() // proces kończy się sam po zamknięciu stdin
+		go func() {
+			if ev, _ := windows.WaitForSingleObject(o.proc, 2000); ev != windows.WAIT_OBJECT_0 {
+				_ = windows.TerminateProcess(o.proc, 0)
+			}
+			_ = windows.CloseHandle(o.proc)
+		}()
+	})
+}
+
+// startSupportOverlay uruchamia ramkę „Aktywne Wsparcie Techniczne” jako zalogowany użytkownik.
+// Bez zalogowanego użytkownika (ekran logowania) nie ma komu jej pokazać — zwraca nil.
+func startSupportOverlay(name string) interface{ stop() } {
+	sid, err := targetSession()
+	if err != nil {
+		return nil
+	}
+	var tok windows.Token
+	if err := windows.WTSQueryUserToken(sid, &tok); err != nil {
+		return nil
+	}
+	defer tok.Close()
+	exe, err := os.Executable()
+	if err != nil {
+		return nil
+	}
+	var env *uint16
+	if err := windows.CreateEnvironmentBlock(&env, tok, false); err != nil {
+		return nil
+	}
+	defer windows.DestroyEnvironmentBlock(env)
+
+	sa := &windows.SecurityAttributes{InheritHandle: 1}
+	sa.Length = uint32(unsafe.Sizeof(*sa))
+	var inR, inW, outR, outW windows.Handle
+	if err := windows.CreatePipe(&inR, &inW, sa, 0); err != nil {
+		return nil
+	}
+	if err := windows.CreatePipe(&outR, &outW, sa, 0); err != nil {
+		windows.CloseHandle(inR)
+		windows.CloseHandle(inW)
+		return nil
+	}
+	_ = windows.SetHandleInformation(inW, windows.HANDLE_FLAG_INHERIT, 0)
+	_ = windows.SetHandleInformation(outR, windows.HANDLE_FLAG_INHERIT, 0)
+	desk, _ := windows.UTF16PtrFromString(`winsta0\default`)
+	si := windows.StartupInfo{Desktop: desk, Flags: windows.STARTF_USESTDHANDLES | windows.STARTF_USESHOWWINDOW, ShowWindow: windows.SW_HIDE, StdInput: inR, StdOutput: outW, StdErr: outW}
+	si.Cb = uint32(unsafe.Sizeof(si))
+	line, _ := windows.UTF16PtrFromString(windows.EscapeArg(exe) + " desktop-overlay " + windows.EscapeArg(cleanOverlayName(name)))
+	var pi windows.ProcessInformation
+	syscall.ForkLock.Lock()
+	err = windows.CreateProcessAsUser(tok, nil, line, nil, nil, true, windows.CREATE_NO_WINDOW|windows.CREATE_UNICODE_ENVIRONMENT, env, nil, &si, &pi)
+	syscall.ForkLock.Unlock()
+	windows.CloseHandle(inR)
+	windows.CloseHandle(outW)
+	if err != nil {
+		windows.CloseHandle(inW)
+		windows.CloseHandle(outR)
+		logger.Warningf("ramka wsparcia: %v", err)
+		return nil
+	}
+	windows.CloseHandle(pi.Thread)
+	// diagnostyka z procesu ramki (wynik ukrywania przed przechwytywaniem) — do pliku agenta
+	go func() {
+		out := os.NewFile(uintptr(outR), "overlay-out")
+		defer out.Close()
+		b, _ := io.ReadAll(io.LimitReader(out, 16<<10))
+		if len(b) > 0 {
+			writeOverlayDiag(strings.Split(strings.TrimSpace(string(b)), "\n"))
+		}
 	}()
+	return &overlayProc{proc: pi.Process, in: os.NewFile(uintptr(inW), "overlay-in")}
 }

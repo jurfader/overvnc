@@ -62,12 +62,6 @@ type helperMsg struct {
 }
 
 // runDesktopHelper — proces pomocniczy w sesji użytkownika. stdout to WYŁĄCZNIE kanał protokołu.
-// helperOverlay — ramka „Aktywne Wsparcie Techniczne” na ekranie użytkownika (tryby zgody „powiadom” i „pytaj”).
-var (
-	helperOverlay     bool
-	helperOverlayName string
-)
-
 func runDesktopHelper() int {
 	// Windows: przełączanie na bieżący pulpit wejściowy (np. ekran blokady) działa per wątek systemowy,
 	// więc przechwytywanie i wstrzykiwanie muszą iść z jednego, przypiętego wątku.
@@ -80,9 +74,6 @@ func runDesktopHelper() int {
 		return 1
 	}
 	defer be.close()
-	if helperOverlay {
-		startSupportOverlay(helperOverlayName)
-	}
 
 	msgs := make(chan helperMsg, 1024)
 	go func() {

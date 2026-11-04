@@ -83,17 +83,22 @@ func handleDesktopOpen(ctx context.Context, data json.RawMessage) (any, error) {
 	if captureGDIOnly.Load() {
 		args = append(args, "gdi")
 	}
-	// użytkownik ma wiedzieć, że ktoś jest połączony — przez całą sesję, nie tylko jednym komunikatem
-	if req.Consent == "notify" || req.Consent == "ask" {
-		args = append(args, "overlay="+cleanOverlayName(req.Viewer))
-	}
+
 	proc, err := spawnDesktopHelper(args...)
 	if err != nil {
 		return nil, protoErr("helper", "nie można uruchomić przechwytywania ekranu: %v", err)
 	}
 	d := &desktopSession{proc: proc}
+	// użytkownik ma wiedzieć, że ktoś jest połączony — ramka przez całą sesję (tryby „z powiadomieniem” i „z pytaniem”)
+	var overlay interface{ stop() }
+	if req.Consent == "notify" || req.Consent == "ask" {
+		overlay = startSupportOverlay(req.Viewer)
+	}
 	if err := sess.channels.add(req.Channel, d); err != nil {
 		proc.kill()
+		if overlay != nil {
+			overlay.stop()
+		}
 		return nil, err
 	}
 	// ustawienia początkowe i zgoda na 2 klatki „w drodze”
@@ -125,7 +130,11 @@ func handleDesktopOpen(ctx context.Context, data json.RawMessage) (any, error) {
 				break
 			}
 		}
-		if code := proc.wait(); helperCrashed(code) && !d.closing.Load() && !captureGDIOnly.Swap(true) {
+		code := proc.wait()
+		if overlay != nil {
+			overlay.stop()
+		}
+		if helperCrashed(code) && !d.closing.Load() && !captureGDIOnly.Swap(true) {
 			logger.Warningf("pulpit %d: pomocnik zakończył się awarią (kod %#x) — kolejne sesje przez GDI", req.Channel, uint32(code))
 		}
 		if sess.channels.remove(req.Channel) != nil {
