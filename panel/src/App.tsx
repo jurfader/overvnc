@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { BellRing, Building2, ChevronRight, LayoutGrid, CloudDownload, LogOut, Menu, Monitor, Moon, PlusCircle, ScrollText, Sun, UserCog, Users, X, type LucideIcon } from 'lucide-react';
+import { BellRing, Building2, ChevronRight, LayoutGrid, ListChecks, CloudDownload, LogOut, Menu, Monitor, Moon, PlusCircle, ScrollText, Sun, UserCog, Users, X, type LucideIcon } from 'lucide-react';
 import { api, type Agent, type Me, type Permission } from './api.ts';
 import { useLiveEvents, type LiveEvent } from './live.ts';
 import { applyTheme, readTheme, Toasts, type Theme } from './components.tsx';
@@ -16,6 +16,7 @@ import { Account } from './pages/Account.tsx';
 import { Updates } from './pages/Updates.tsx';
 import { Alerts } from './pages/Alerts.tsx';
 import { Wall } from './pages/Wall.tsx';
+import { JobPage, Jobs } from './pages/Jobs.tsx';
 
 /** Routing w hashu: "#/sciezka?param=wartosc". */
 function useHashRoute(): { path: string; query: URLSearchParams } {
@@ -119,6 +120,8 @@ function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme
 
   const onEvent = useCallback((e: LiveEvent) => {
     if (e.type === 'org_changed') return orgChanged();
+    // strony zadań same pobiorą to, co widzi konto (zdarzenie niesie tylko numery)
+    if (e.type === 'jobs_changed') return void window.dispatchEvent(new CustomEvent('overvnc:jobs', { detail: e.data?.ids ?? [] }));
     if (e.type === 'alert_opened' || e.type === 'alert_resolved' || e.type === 'alert_updated') return alertEvent({ type: e.type, data: e.data });
     if (!e.id) return;
     const id = e.id;
@@ -150,6 +153,7 @@ function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme
     loadAgents();
     orgChanged();
     window.dispatchEvent(new Event('overvnc:alerts-reload'));
+    window.dispatchEvent(new CustomEvent('overvnc:jobs', { detail: [] }));
     void reloadMe();
   }, [loadAgents, reloadMe]);
   useLiveEvents(true, onEvent, onReconnect);
@@ -173,6 +177,7 @@ function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme
           countTitle: 'niepotwierdzone alerty',
         },
         { href: '/wall', label: 'Ekrany', icon: LayoutGrid, perm: 'agents.remote', match: (p) => p === '/wall' },
+        { href: '/jobs', label: 'Zadania', icon: ListChecks, perm: 'agents.remote', match: (p) => p === '/jobs' || p.startsWith('/jobs/') },
         { href: '/clients', label: 'Klienci', icon: Building2, perm: 'agents.view', match: (p) => p === '/clients' },
         { href: '/tokens', label: 'Dodaj komputer', icon: PlusCircle, perm: 'tokens.manage', match: (p) => p === '/tokens' },
       ],
@@ -196,6 +201,8 @@ function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme
   else if (path === '/clients') page = <Clients />;
   else if (path === '/alerts') page = <Alerts />;
   else if (path === '/wall' && can('agents.remote')) page = <Wall agents={list} />;
+  else if (path === '/jobs' && can('agents.remote')) page = <Jobs agents={list} />;
+  else if (/^\/jobs\/\d+$/.test(path) && can('agents.remote')) page = <JobPage key={path} id={Number(path.slice(6))} agents={agents} />;
   else if (path === '/tokens' && can('tokens.manage')) page = <Tokens />;
   else if (path === '/team' && can('team.manage')) page = <Team />;
   else if (path === '/audit' && can('audit.view') && me.allClients) page = <Audit />;

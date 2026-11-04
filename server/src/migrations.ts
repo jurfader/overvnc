@@ -211,4 +211,36 @@ export const MIGRATIONS: string[] = [
   INSERT INTO alert_rules (name, kind, threshold, duration_min, created_at) VALUES
     ('Kończy się wersja próbna Windows', 'license', 14, 0, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
   `,
+
+  // 8 — zadania (polecenia/skrypty na wielu komputerach, w tle; komputery offline dostają je po połączeniu) (v0.13.0)
+  `
+  CREATE TABLE jobs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT NOT NULL,                 -- script | message | power | inventory
+    title       TEXT NOT NULL,
+    params_json TEXT NOT NULL,
+    user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_by  TEXT NOT NULL,                 -- login autora (zostaje po usunięciu konta)
+    created_at  INTEGER NOT NULL,
+    expires_at  INTEGER NOT NULL,              -- do kiedy czekamy na komputery offline
+    finished_at INTEGER,
+    canceled_at INTEGER
+  );
+  CREATE INDEX jobs_created ON jobs(created_at DESC);
+
+  CREATE TABLE job_targets (
+    job_id      INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    agent_id    TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    run_id      TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'queued', -- queued | running | ok | failed | expired | canceled | lost
+    started_at  INTEGER,
+    finished_at INTEGER,
+    exit_code   INTEGER,
+    output      TEXT,
+    error       TEXT,
+    run_as      TEXT,
+    PRIMARY KEY (job_id, agent_id)
+  );
+  CREATE INDEX job_targets_agent ON job_targets(agent_id, status);
+  `,
 ];

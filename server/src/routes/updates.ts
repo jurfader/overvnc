@@ -67,7 +67,7 @@ export async function updateRoutes(app: FastifyInstance, ctx: Ctx) {
   // Komputer, który był offline w chwili wydania (albo wrócił po restarcie serwera), dostaje aktualizację
   // po połączeniu — inaczej czekałby do własnego sprawdzenia agenta (co kilka godzin).
   const pending = new Set<NodeJS.Timeout>();
-  hub.listeners.ready = (id) => {
+  hub.on('ready', (id) => {
     const delay = RECONNECT_UPDATE_DELAY.minMs + Math.random() * RECONNECT_UPDATE_DELAY.spreadMs;
     const t = setTimeout(() => {
       pending.delete(t);
@@ -79,7 +79,7 @@ export async function updateRoutes(app: FastifyInstance, ctx: Ctx) {
     }, delay);
     t.unref();
     pending.add(t);
-  };
+  });
   app.addHook('onClose', async () => {
     for (const t of pending) clearTimeout(t);
     pending.clear();

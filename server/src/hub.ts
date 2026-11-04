@@ -98,6 +98,15 @@ export interface TagRef {
   color: string;
 }
 
+export interface HubEvents {
+  metrics: (agentId: string, data: Record<string, unknown>) => void;
+  connected: (agentId: string) => void;
+  /** agent przedstawił się (wersja i możliwości znane) */
+  ready: (agentId: string) => void;
+  /** nowy inwentarz (m.in. licencja Windows) */
+  inventory: (agentId: string, inv: Record<string, any>) => void;
+}
+
 interface PanelState {
   alive: boolean;
   userId: number;
@@ -142,21 +151,20 @@ export class Hub {
   private metrics?: MetricsStore;
   private pingTimer: NodeJS.Timeout;
   private closed = false;
-  /** Słuchacze zdarzeń agentów (np. silnik alertów); błąd słuchacza nie przerywa obsługi agenta. */
-  listeners: {
-    metrics?: (agentId: string, data: Record<string, unknown>) => void;
-    connected?: (agentId: string) => void;
-    /** agent przedstawił się (wersja i możliwości znane) */
-    ready?: (agentId: string) => void;
-    /** nowy inwentarz (m.in. licencja Windows) */
-    inventory?: (agentId: string, inv: Record<string, any>) => void;
-  } = {};
+  /** Słuchacze zdarzeń agentów (silnik alertów, aktualizacje, zadania); błąd słuchacza nie przerywa obsługi agenta. */
+  private listeners: { [K in keyof HubEvents]: HubEvents[K][] } = { metrics: [], connected: [], ready: [], inventory: [] };
 
-  private notify<K extends keyof Hub['listeners']>(name: K, ...args: Parameters<NonNullable<Hub['listeners'][K]>>): void {
-    try {
-      (this.listeners[name] as ((...a: unknown[]) => void) | undefined)?.(...args);
-    } catch (err) {
-      console.error(`hub: słuchacz ${name}:`, err);
+  on<K extends keyof HubEvents>(name: K, fn: HubEvents[K]): void {
+    this.listeners[name].push(fn);
+  }
+
+  private notify<K extends keyof HubEvents>(name: K, ...args: Parameters<HubEvents[K]>): void {
+    for (const fn of this.listeners[name]) {
+      try {
+        (fn as (...a: unknown[]) => void)(...args);
+      } catch (err) {
+        console.error(`hub: słuchacz ${name}:`, err);
+      }
     }
   }
 

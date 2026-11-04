@@ -130,6 +130,15 @@ for _ in $(seq 50); do grep -q "Przerwa techniczna e2e" "$WORK/agent.log" && bre
 grep -q "Przerwa techniczna e2e" "$WORK/agent.log" || fail "komunikat nie dotarł do komputera"
 echo "✔ kiosk: zrzut ekranu (JPEG $(wc -c <"$WORK/shot.jpg" | tr -d ' ') B, 320 px) i komunikat na ekranie"
 
+# zadanie: skrypt w prawdziwej powłoce, wynik i kod wyjścia zapisane przez serwer
+JOB=$(curl -sf -b "$J" -X POST "$B/api/jobs" -H 'content-type: application/json' \
+  -d "{\"kind\":\"script\",\"agentIds\":[\"$ID\"],\"waitHours\":0,\"params\":{\"shell\":\"sh\",\"script\":\"echo zażółć-e2e; exit 4\",\"timeoutSec\":60}}" | json .id) || fail "utworzenie zadania"
+for _ in $(seq 100); do [ "$(curl -sf -b "$J" "$B/api/jobs/$JOB" | json '.finishedAt !== null')" = "true" ] && break; sleep 0.1; done
+JD=$(curl -sf -b "$J" "$B/api/jobs/$JOB")
+[ "$(echo "$JD" | json '.targets[0].exitCode')" = "4" ] || fail "zadanie: kod wyjścia ($(echo "$JD" | json '.targets[0].status'))"
+curl -sf -b "$J" "$B/api/jobs/$JOB/output/$ID" | grep -q 'zażółć-e2e' || fail "zadanie: wyjście skryptu"
+echo "✔ zadanie: skrypt w powłoce, wyjście UTF-8 i kod wyjścia"
+
 curl -sf -b "$J" -X DELETE "$B/api/agents/$ID" >/dev/null || fail "usuwanie"
 for _ in $(seq 50); do grep -q "odrzucił" "$WORK/agent.log" && break; sleep 0.1; done
 grep -q "odrzucił" "$WORK/agent.log" || fail "agent nie został odrzucony po usunięciu"

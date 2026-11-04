@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 
 export interface LiveEvent {
-  type: 'agent_online' | 'agent_offline' | 'agent_updated' | 'agent_metrics' | 'agent_added' | 'agent_removed' | 'org_changed' | 'alert_opened' | 'alert_resolved' | 'alert_updated';
+  type: 'agent_online' | 'agent_offline' | 'agent_updated' | 'agent_metrics' | 'agent_added' | 'agent_removed' | 'org_changed' | 'alert_opened' | 'alert_resolved' | 'alert_updated' | 'jobs_changed';
   id?: string;
   data?: any;
 }

@@ -475,4 +475,67 @@ export const api = {
     request<NotificationSettings>('PUT', '/api/settings/notifications', body),
   testNotification: () => request<Ok>('POST', '/api/settings/notifications/test', {}),
 
+  // zadania (skrypty i akcje na wielu komputerach, w tle)
+  createJob: (body: JobInput) => request<{ id: number }>('POST', '/api/jobs', body),
+  jobs: (agentId?: string) => request<Job[]>('GET', `/api/jobs${agentId ? `?agentId=${agentId}` : ''}`),
+  job: (id: number) => request<JobDetail>('GET', `/api/jobs/${id}`),
+  jobOutput: (id: number, agentId: string) => request<{ output: string }>('GET', `/api/jobs/${id}/output/${agentId}`),
+  cancelJob: (id: number) => request<Ok>('POST', `/api/jobs/${id}/cancel`, {}),
+  retryJob: (id: number) => request<{ id: number }>('POST', `/api/jobs/${id}/retry`, {}),
+
 };
+
+// ---------- zadania ----------
+
+export type JobKind = 'script' | 'message' | 'power' | 'inventory';
+export type JobTargetStatus = 'queued' | 'running' | 'ok' | 'failed' | 'expired' | 'canceled' | 'lost';
+export type ScriptShell = 'powershell' | 'pwsh' | 'cmd' | 'bash' | 'zsh' | 'sh';
+
+export interface ScriptJobParams {
+  shell: ScriptShell;
+  script: string;
+  timeoutSec: number;
+  asUser: boolean;
+}
+
+export type JobInput = { agentIds: string[]; waitHours: number; title?: string } & (
+  | { kind: 'script'; params: ScriptJobParams }
+  | { kind: 'message'; params: { text: string; title?: string; seconds?: number } }
+  | { kind: 'power'; params: { action: 'reboot' | 'shutdown'; delayMinutes?: number; message?: string } }
+  | { kind: 'inventory'; params?: Record<string, never> }
+);
+
+export interface Job {
+  id: number;
+  kind: JobKind;
+  title: string;
+  params: any;
+  createdBy: string;
+  createdAt: number;
+  expiresAt: number;
+  finishedAt: number | null;
+  canceledAt: number | null;
+  counts: Record<JobTargetStatus, number>;
+  total: number;
+}
+
+export interface JobTarget {
+  agentId: string;
+  name: string;
+  os: string;
+  clientName: string | null;
+  clientColor: string | null;
+  online: boolean;
+  status: JobTargetStatus;
+  startedAt: number | null;
+  finishedAt: number | null;
+  exitCode: number | null;
+  error: string | null;
+  runAs: string | null;
+  preview: string;
+  outputBytes: number;
+}
+
+export interface JobDetail extends Job {
+  targets: JobTarget[];
+}

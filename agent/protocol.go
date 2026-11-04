@@ -47,6 +47,9 @@ var handlers = map[string]handlerFunc{
 
 const requestTimeout = 5 * time.Minute
 
+// handlerTimeouts — dłuższe limity dla poleceń, które z natury trwają długo (np. skrypty).
+var handlerTimeouts = map[string]time.Duration{}
+
 func capabilities() []string {
 	out := make([]string, 0, len(handlers))
 	for k := range handlers {
@@ -71,7 +74,11 @@ func handleRequest(ctx context.Context, req Envelope) (resp Envelope) {
 		}
 	}()
 
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	timeout := requestTimeout
+	if t, ok := handlerTimeouts[req.Type]; ok {
+		timeout = t
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	out, err := h(ctx, req.Data)
 	if err != nil {

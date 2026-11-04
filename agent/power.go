@@ -61,5 +61,8 @@ func extraCapabilities() []string {
 	for _, a := range supportedPowerActions() {
 		out = append(out, "power."+a)
 	}
+	if userScriptsSupported() {
+		out = append(out, "script.user")
+	}
 	return out
 }

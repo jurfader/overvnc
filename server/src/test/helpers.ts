@@ -186,9 +186,9 @@ export class FakeAgent {
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Czeka, aż warunek będzie spełniony (np. serwer przetworzy wiadomość). */
-export async function until(cond: () => boolean, timeoutMs = 2000): Promise<void> {
+export async function until(cond: () => boolean | Promise<boolean>, timeoutMs = 2000): Promise<void> {
   const end = Date.now() + timeoutMs;
-  while (!cond()) {
+  while (!(await cond())) {
     if (Date.now() > end) throw new Error('until: timeout');
     await sleep(10);
   }

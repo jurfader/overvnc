@@ -1,8 +1,9 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { Activity, AlertTriangle, ArrowLeft, MoreHorizontal, Building2, CloudDownload, Cog, MonitorSmartphone, FolderOpen, LayoutDashboard, LineChart, TerminalSquare, Clock, Cpu, HardDrive, Info, MemoryStick, Network, Package, Pencil, RefreshCw, Search, Trash2, Users } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowLeft, FileTerminal, ListChecks, MoreHorizontal, Building2, CloudDownload, Cog, MonitorSmartphone, FolderOpen, LayoutDashboard, LineChart, TerminalSquare, Clock, Cpu, HardDrive, Info, MemoryStick, Network, Package, Pencil, RefreshCw, Search, Trash2, Users } from 'lucide-react';
 import { api, errorMessage, type Agent, type AgentDetail } from '../api.ts';
 import { Button, CardHead, Dropdown, ClientLabel, EmptyState, Meter, Modal, OsBadge, StatTile, Status, TagChip, toast } from '../components.tsx';
 import { useAlerts, useMe } from '../state.tsx';
+import { NewJobModal } from './Jobs.tsx';
 import { alertValue, lasting } from './Alerts.tsx';
 import { OrganizeModal } from './organize.tsx';
 import { MonitoringView } from './remote/MonitoringView.tsx';
@@ -43,6 +44,7 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
   const machineAlerts = byAgent.get(id) ?? [];
   const remote = can('agents.remote');
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [scriptOpen, setScriptOpen] = useState(false);
 
   // pobierz szczegóły przy wejściu i za każdym razem, gdy serwer zgłosi nowy inwentarz
   useEffect(() => {
@@ -130,6 +132,11 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
         <div className="toolbar">
           {remote && a.online && <PowerMenu agent={a} />}
           {remote && !a.online && <WakeButton agent={a} />}
+          {remote && (
+            <Button className="only-desktop" icon={FileTerminal} onClick={() => setScriptOpen(true)} title="Skrypt, komunikat lub inne zadanie — wynik i historia w Zadaniach">
+              Uruchom skrypt
+            </Button>
+          )}
           {can('agents.manage') && (
             <Button className="only-desktop" icon={Pencil} onClick={() => setEditOpen(true)}>
               Edytuj
@@ -156,6 +163,12 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
               icon={MoreHorizontal}
               label="Więcej"
               items={[
+                ...(remote
+                  ? [
+                      { key: 'script', label: 'Uruchom skrypt', icon: FileTerminal, onClick: () => setScriptOpen(true) },
+                      { key: 'jobs', label: 'Historia zadań', icon: ListChecks, onClick: () => (location.hash = `/jobs?agent=${id}`) },
+                    ]
+                  : []),
                 ...(can('agents.manage') ? [{ key: 'edit', label: 'Edytuj nazwę, klienta i tagi', icon: Pencil, onClick: () => setEditOpen(true) }] : []),
                 ...(canUpgrade ? [{ key: 'upgrade', label: 'Aktualizuj agenta', icon: CloudDownload, disabled: updating, onClick: upgrade }] : []),
                 ...(can('agents.refresh') ? [{ key: 'refresh', label: 'Odśwież inwentarz', icon: RefreshCw, disabled: !a.online || refreshing, onClick: refresh }] : []),
@@ -165,6 +178,8 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
           </span>
         </div>
       </header>
+
+      {remote && <NewJobModal open={scriptOpen} onClose={() => setScriptOpen(false)} agents={[a]} preselected={[id]} />}
 
       {machineAlerts.length > 0 && (
         <div className="callout callout-danger anim-rise" role="status">

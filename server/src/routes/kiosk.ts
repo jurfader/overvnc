@@ -8,7 +8,7 @@ import { assertAgentAccess } from '../scope.ts';
 
 const IdParams = z.object({ id: z.uuid() });
 const ShotQuery = z.object({ w: z.coerce.number().int().min(160).max(1920).default(640) });
-const MessageBody = z.object({
+export const MessageBody = z.object({
   text: z.string().trim().min(1, 'Wpisz treść komunikatu.').max(500),
   title: z.string().trim().max(80).default(''),
   seconds: z.number().int().min(5).max(3600).default(60),

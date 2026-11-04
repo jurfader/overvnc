@@ -94,6 +94,8 @@ W `hello` agent wysyła listę obsługiwanych poleceń. Serwer odrzuca polecenie
 
 | `desktop.open` `{channel, monitor, quality, consent, viewer, viewOnly}` | 0.7.0 | pulpit zdalny (Windows); szczegóły niżej |
 | `update.check` | 0.6.0 | natychmiastowe sprawdzenie i instalacja aktualizacji; wynik `{status: up_to_date \| restarting \| skipped \| disabled}` |
+| `script.run` `{runId, shell, script, timeoutSec, asUser}` | 0.13.0 | jednorazowy skrypt (zadania); wynik `{exitCode, output, truncated, timedOut, durationMs, user}`; wyjście: pierwsze 48 KB + ostatnie 16 KB. Skrypt działa niezależnie od połączenia; ten sam `runId` nie uruchamia go drugi raz. `asUser` (możliwość `script.user`): w sesji zalogowanego użytkownika |
+| `script.result` `{runId}` | 0.13.0 | wynik uruchomienia sprzed rozłączenia (czeka, jeśli trwa); wyniki trzymane 1 h; `unknown_run` po restarcie agenta |
 
 ### Pulpit zdalny
 

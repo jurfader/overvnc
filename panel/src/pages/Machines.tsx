@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { AlertTriangle, Building2, FilterX, Monitor, PlusCircle, Power, Search, Tag as TagIcon, Wifi, X } from 'lucide-react';
+import { AlertTriangle, Building2, FileTerminal, FilterX, MessageSquareText, Monitor, PlusCircle, Power, RotateCw, Search, Tag as TagIcon, Wifi, X } from 'lucide-react';
 import type { Agent } from '../api.ts';
 import { Badge, Button, Checkbox, ClientLabel, EmptyState, Meter, OsBadge, osIcon, StatTile, Status, TagChip } from '../components.tsx';
 import { ago, bytes, platformLabel, plural } from '../format.ts';
 import { useAlerts, useMe, useOrg } from '../state.tsx';
 import { BulkModal, type BulkMode } from './organize.tsx';
+import { NewJobModal } from './Jobs.tsx';
+import type { JobKind } from '../api.ts';
 
 type StatusFilter = 'all' | 'online' | 'offline' | 'alert';
 
@@ -25,6 +27,10 @@ export function Machines({ agents, initialClient }: { agents: Agent[]; initialCl
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulk, setBulk] = useState<BulkMode | null>(null);
   const manage = can('agents.manage');
+  const remote = can('agents.remote');
+  /** zaznaczanie: porządkowanie (admin) albo akcje grupowe (technik) */
+  const selectable = manage || remote;
+  const [jobKind, setJobKind] = useState<JobKind | null>(null);
 
   useEffect(() => setClientF(initialClient), [initialClient]);
   useEffect(() => setSiteF(null), [clientF]);
@@ -155,26 +161,43 @@ export function Machines({ agents, initialClient }: { agents: Agent[]; initialCl
         )}
       </div>
 
-      {manage && selected.size > 0 && (
+      {selectable && selected.size > 0 && (
         <div className="bulk-bar anim-pop">
           <span className="count">
             Zaznaczono: {selected.size} {plural(selected.size, 'komputer', 'komputery', 'komputerów')}
           </span>
-          <Button size="sm" icon={Building2} onClick={() => setBulk('place')}>
-            Przypisz do klienta
-          </Button>
-          <Button size="sm" icon={TagIcon} onClick={() => setBulk('addTags')}>
-            Dodaj tagi
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setBulk('removeTags')}>
-            Usuń tagi
-          </Button>
+          {remote && (
+            <>
+              <Button size="sm" variant="primary" icon={FileTerminal} onClick={() => setJobKind('script')}>
+                Skrypt
+              </Button>
+              <Button size="sm" icon={MessageSquareText} onClick={() => setJobKind('message')}>
+                Komunikat
+              </Button>
+              <Button size="sm" icon={RotateCw} onClick={() => setJobKind('power')}>
+                Restart
+              </Button>
+            </>
+          )}
+          {manage && (
+            <>
+              <Button size="sm" icon={Building2} onClick={() => setBulk('place')}>
+                Przypisz do klienta
+              </Button>
+              <Button size="sm" icon={TagIcon} onClick={() => setBulk('addTags')}>
+                Dodaj tagi
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setBulk('removeTags')}>
+                Usuń tagi
+              </Button>
+            </>
+          )}
           <Button size="sm" variant="ghost" icon={X} title="Odznacz" onClick={() => setSelected(new Set())} />
         </div>
       )}
 
       <div className="glass-card table-card anim-rise" style={{ animationDelay: '160ms' }}>
-        {manage && rows.length > 0 && (
+        {selectable && rows.length > 0 && (
           <label className="only-mobile mobile-selectall">
             <Checkbox label="Zaznacz wszystkie" checked={allSelected} indeterminate={selected.size > 0 && !allSelected} onChange={toggleAll} /> Zaznacz wszystkie ({rows.length})
           </label>
@@ -183,7 +206,7 @@ export function Machines({ agents, initialClient }: { agents: Agent[]; initialCl
           <table className="table hover clickable stack">
             <thead>
               <tr>
-                {manage && (
+                {selectable && (
                   <th className="cb-cell">
                     <Checkbox label="Zaznacz wszystkie" checked={allSelected} indeterminate={selected.size > 0 && !allSelected} onChange={toggleAll} />
                   </th>
@@ -207,7 +230,7 @@ export function Machines({ agents, initialClient }: { agents: Agent[]; initialCl
                 const isSel = selected.has(a.id);
                 return (
                   <tr key={a.id} className={isSel ? 'row-selected' : ''} onClick={() => (location.hash = `/m/${a.id}`)}>
-                    {manage && (
+                    {selectable && (
                       <td className="cb-cell" onClick={(e) => e.stopPropagation()}>
                         <Checkbox label={`Zaznacz ${a.label || a.hostname}`} checked={isSel} onChange={(v) => toggle(a.id, v)} />
                       </td>
@@ -275,7 +298,7 @@ export function Machines({ agents, initialClient }: { agents: Agent[]; initialCl
               })}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={manage ? 9 : 8} className="center-text">
+                  <td colSpan={selectable ? 9 : 8} className="center-text">
                     Brak komputerów pasujących do filtrów.{' '}
                     <button className="link-btn" style={{ display: 'inline-flex' }} onClick={clearFilters}>
                       Wyczyść filtry
@@ -287,6 +310,8 @@ export function Machines({ agents, initialClient }: { agents: Agent[]; initialCl
           </table>
         </div>
       </div>
+
+      <NewJobModal open={jobKind !== null} onClose={() => setJobKind(null)} agents={agents} preselected={[...selected]} initialKind={jobKind ?? 'script'} />
 
       <BulkModal
         mode={bulk}

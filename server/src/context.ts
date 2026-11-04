@@ -7,6 +7,7 @@ import type { UpdateStore } from './updates.ts';
 import type { MetricsStore } from './metrics.ts';
 import type { AlertEngine } from './alerts.ts';
 import type { Notifier } from './notify.ts';
+import type { JobRunner } from './jobs.ts';
 
 /** Zależności współdzielone przez wszystkie moduły tras. */
 export interface Ctx {
@@ -23,6 +24,8 @@ export interface Ctx {
   alerts: AlertEngine;
   /** Powiadomienia push (Pushover). */
   notifier: Notifier;
+  /** Zadania w tle (skrypty i akcje na wielu komputerach). */
+  jobs: JobRunner;
   /** Wysyła „sprawdź aktualizację” do nieaktualnych komputerów (ustawiane przez trasy aktualizacji). */
   rollout?: (ids?: string[]) => number;
   limits: {
