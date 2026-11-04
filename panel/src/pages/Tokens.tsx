@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { AlertTriangle, Check, Copy, KeyRound, Laptop, Monitor, PlusCircle, ShieldCheck, Terminal, Trash2 } from 'lucide-react';
-import { api, type EnrollToken } from '../api.ts';
+import { api, errorMessage, type EnrollToken } from '../api.ts';
 import { Badge, Button, CardHead, toast } from '../components.tsx';
 import { dateTime } from '../format.ts';
 
@@ -25,8 +25,8 @@ export function Tokens() {
       setCreated(r.token);
       setLabel('');
       load();
-    } catch {
-      toast('Nie udało się utworzyć tokenu', 'err');
+    } catch (err) {
+      toast(errorMessage(err, 'Nie udało się utworzyć tokenu'), 'err');
     } finally {
       setBusy(false);
     }

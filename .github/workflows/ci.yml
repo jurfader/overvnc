@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            panel/package-lock.json
+      - run: npm ci
+        working-directory: server
+      - run: npm ci
+        working-directory: panel
+      - run: scripts/check.sh
+
+  agents:
+    needs: check
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - run: scripts/build-agents.sh "0.0.0-${GITHUB_SHA::7}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: overvnc-agents
+          path: dist/agents/

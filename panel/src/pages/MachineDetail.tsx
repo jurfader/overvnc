@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { ArrowLeft, Clock, Cpu, HardDrive, Info, MemoryStick, Network, Package, Pencil, RefreshCw, Search, Trash2, Users } from 'lucide-react';
-import { api, type Agent, type AgentDetail } from '../api.ts';
+import { api, errorMessage, type Agent, type AgentDetail } from '../api.ts';
 import { Button, CardHead, EmptyState, Meter, Modal, OsBadge, StatTile, Status, toast } from '../components.tsx';
 import { ago, bytes, dateTime, duration, platformLabel, rate } from '../format.ts';
 
@@ -15,10 +15,7 @@ export function MachineDetail({ id, live }: { id: string; live: Agent | undefine
   // pobierz szczegóły przy wejściu i za każdym razem, gdy serwer zgłosi nowy inwentarz
   useEffect(() => {
     api.agent(id).then(
-      (d) => {
-        setDetail(d);
-        setRefreshing(false);
-      },
+      (d) => setDetail(d),
       () => setNotFound(true),
     );
   }, [id, live?.rev]);
@@ -48,10 +45,11 @@ export function MachineDetail({ id, live }: { id: string; live: Agent | undefine
     setRefreshing(true);
     try {
       await api.refreshInventory(id);
-      toast('Poproszono agenta o nowy inwentarz');
-    } catch {
+      toast('Inwentarz zaktualizowany');
+    } catch (err) {
+      toast(errorMessage(err), 'err');
+    } finally {
       setRefreshing(false);
-      toast('Komputer jest offline', 'err');
     }
   };
 
@@ -253,8 +251,8 @@ function RenameModal({ open, onClose, id, current, hostname }: { open: boolean; 
       await api.setLabel(id, value.trim());
       toast('Zapisano nazwę');
       onClose();
-    } catch {
-      toast('Nie udało się zapisać', 'err');
+    } catch (err) {
+      toast(errorMessage(err, 'Nie udało się zapisać'), 'err');
     } finally {
       setBusy(false);
     }
@@ -290,8 +288,8 @@ function DeleteModal({ open, onClose, id, name }: { open: boolean; onClose: () =
       await api.deleteAgent(id);
       toast(`Usunięto ${name}`);
       location.hash = '/';
-    } catch {
-      toast('Nie udało się usunąć', 'err');
+    } catch (err) {
+      toast(errorMessage(err, 'Nie udało się usunąć'), 'err');
       setBusy(false);
     }
   };

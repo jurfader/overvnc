@@ -17,16 +17,10 @@ const (
 	inventoryInterval = 6 * time.Hour
 	pingInterval      = 30 * time.Second
 	maxBackoff        = 60 * time.Second
+	maxConcurrentReqs = 16
 )
 
 var errUnauthorized = errors.New("serwer odrzucił dane agenta (agent usunięty z panelu?)")
-
-// Envelope — wspólny format wiadomości z serwerem.
-type Envelope struct {
-	Type string          `json:"type"`
-	ID   string          `json:"id,omitempty"`
-	Data json.RawMessage `json:"data,omitempty"`
-}
 
 // runAgent utrzymuje połączenie z serwerem aż do anulowania ctx.
 func runAgent(ctx context.Context, cfg *Config) {
@@ -80,14 +74,18 @@ func session(parent context.Context, cfg *Config) error {
 	conn.SetReadLimit(16 << 20)
 	logger.Info("połączono z serwerem")
 
+	// coder/websocket pozwala na współbieżne Write, więc odpowiedzi i zdarzenia mogą iść z wielu gorutyn
+	write := func(env Envelope) error {
+		wctx, wcancel := context.WithTimeout(ctx, 30*time.Second)
+		defer wcancel()
+		return wsjson.Write(wctx, conn, env)
+	}
 	send := func(typ string, data any) error {
 		raw, err := json.Marshal(data)
 		if err != nil {
 			return err
 		}
-		wctx, wcancel := context.WithTimeout(ctx, 30*time.Second)
-		defer wcancel()
-		return wsjson.Write(wctx, conn, Envelope{Type: typ, Data: raw})
+		return write(Envelope{Type: typ, Data: raw})
 	}
 
 	errc := make(chan error, 4)
@@ -98,24 +96,30 @@ func session(parent context.Context, cfg *Config) error {
 		}
 	}
 
-	// odczyt poleceń z serwera
-	inventoryNow := make(chan struct{}, 1)
+	// odczyt żądań z serwera; każde wykonywane w osobnej gorutynie, z limitem współbieżności
 	go func() {
+		sem := make(chan struct{}, maxConcurrentReqs)
 		for {
 			var msg Envelope
 			if err := wsjson.Read(ctx, conn, &msg); err != nil {
 				fail(err)
 				return
 			}
-			switch msg.Type {
-			case "refresh_inventory":
-				select {
-				case inventoryNow <- struct{}{}:
-				default:
-				}
-			default:
-				logger.Warningf("nieznane polecenie: %s", msg.Type)
+			if msg.ID == "" {
+				continue // serwer nie wysyła obecnie zdarzeń bez ID
 			}
+			select {
+			case sem <- struct{}{}:
+			default:
+				_ = write(Envelope{Type: "error", ID: msg.ID, Error: protoErr("busy", "agent wykonuje zbyt wiele poleceń naraz")})
+				continue
+			}
+			go func(req Envelope) {
+				defer func() { <-sem }()
+				if err := write(handleRequest(ctx, req)); err != nil {
+					fail(err)
+				}
+			}(msg)
 		}
 	}()
 
@@ -139,9 +143,15 @@ func session(parent context.Context, cfg *Config) error {
 		}
 	}()
 
-	// hello + inwentarz, potem cykliczne metryki
+	// hello + inwentarz, potem cykliczne metryki i inwentarz
 	go func() {
-		if err := send("hello", map[string]any{"version": version, "inventory": collectInventory(ctx)}); err != nil {
+		hello := map[string]any{
+			"version":      version,
+			"protocol":     protocolVersion,
+			"capabilities": capabilities(),
+			"inventory":    collectInventory(ctx),
+		}
+		if err := send("hello", hello); err != nil {
 			fail(err)
 			return
 		}
@@ -162,8 +172,6 @@ func session(parent context.Context, cfg *Config) error {
 			case <-metricsT.C:
 				err = send("metrics", mc.collect(ctx))
 			case <-invT.C:
-				err = send("inventory", collectInventory(ctx))
-			case <-inventoryNow:
 				err = send("inventory", collectInventory(ctx))
 			}
 			if err != nil {

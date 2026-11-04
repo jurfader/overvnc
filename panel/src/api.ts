@@ -28,6 +28,8 @@ export interface Agent {
   online: boolean;
   connectedAt: number | null;
   metrics: Metrics | null;
+  /** polecenia obsługiwane przez połączonego agenta (pusta lista, gdy offline) */
+  capabilities: string[];
   /** tylko po stronie panelu: zmienia się, gdy serwer zgłosi nowe dane inwentarza */
   rev?: number;
 }
@@ -78,12 +80,21 @@ export interface AuditEntry {
   ip: string | null;
 }
 
+/** Błąd z API: `code` jest maszynowy (np. "agent_offline"), `message` gotowy do pokazania użytkownikowi. */
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  code: string;
+  constructor(status: number, code: string, message: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
+}
+
+/** Komunikat błędu do pokazania w panelu. */
+export function errorMessage(err: unknown, fallback = 'Wystąpił błąd.'): string {
+  if (err instanceof ApiError) return err.message || fallback;
+  return 'Brak połączenia z serwerem.';
 }
 
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
@@ -96,7 +107,8 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     if (res.status === 401 && url !== '/api/auth/login') window.dispatchEvent(new Event('overvnc:unauthorized'));
-    throw new ApiError(res.status, (data as { error?: string }).error ?? res.statusText);
+    const e = data as { error?: string; message?: string };
+    throw new ApiError(res.status, e.error ?? 'http_' + res.status, e.message ?? res.statusText);
   }
   return data as T;
 }

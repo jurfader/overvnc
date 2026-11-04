@@ -1,14 +1,12 @@
 // Narzędzia administracyjne:
 //   npm run cli -- passwd <login>     ustaw/zmień hasło (tworzy konto, jeśli nie istnieje)
 //   npm run cli -- users              lista kont
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
+import { loadConfig } from './config.ts';
 import { audit, openDb } from './db.ts';
 import { hashPassword } from './crypto.ts';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const db = openDb(process.env.DATA_DIR ?? path.resolve(__dirname, '../data'));
+const db = openDb(loadConfig().dbFile);
 const [cmd, arg] = process.argv.slice(2);
 
 if (cmd === 'passwd' && arg) {

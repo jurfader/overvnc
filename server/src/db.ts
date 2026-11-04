@@ -1,67 +1,51 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS users (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  username      TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  created_at    INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS sessions (
-  token_hash TEXT PRIMARY KEY,
-  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  expires_at INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS enroll_tokens (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  token_hash TEXT NOT NULL UNIQUE,
-  label      TEXT NOT NULL,
-  uses_left  INTEGER,             -- NULL = bez limitu
-  expires_at INTEGER NOT NULL,
-  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  created_at INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS agents (
-  id             TEXT PRIMARY KEY,
-  secret_hash    TEXT NOT NULL,
-  hostname       TEXT NOT NULL,
-  os             TEXT NOT NULL DEFAULT '',
-  platform       TEXT NOT NULL DEFAULT '',
-  arch           TEXT NOT NULL DEFAULT '',
-  agent_version  TEXT NOT NULL DEFAULT '',
-  label          TEXT NOT NULL DEFAULT '',
-  inventory_json TEXT,
-  metrics_json   TEXT,
-  last_ip        TEXT,
-  enrolled_at    INTEGER NOT NULL,
-  last_seen      INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS audit_log (
-  id       INTEGER PRIMARY KEY AUTOINCREMENT,
-  ts       INTEGER NOT NULL,
-  actor    TEXT NOT NULL,          -- 'user:<name>', 'agent:<id>', 'system'
-  action   TEXT NOT NULL,
-  target   TEXT,
-  details  TEXT,
-  ip       TEXT
-);
-CREATE INDEX IF NOT EXISTS audit_ts ON audit_log(ts DESC);
-`;
+import { MIGRATIONS } from './migrations.ts';
 
 export type Db = DatabaseSync;
 
-export function openDb(dataDir: string): Db {
-  mkdirSync(dataDir, { recursive: true });
-  const db = new DatabaseSync(path.join(dataDir, 'overvnc.db'));
+export function openDb(file: string): Db {
+  if (file !== ':memory:') mkdirSync(path.dirname(file), { recursive: true });
+  const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
-  db.exec(SCHEMA);
+  migrate(db);
   return db;
+}
+
+/** Stosuje brakujące migracje, każdą w osobnej transakcji. Zwraca bieżącą wersję schematu. */
+export function migrate(db: Db): number {
+  let version = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
+  if (version > MIGRATIONS.length) {
+    throw new Error(`Baza ma schemat v${version}, a ta wersja serwera zna tylko v${MIGRATIONS.length} — zaktualizuj serwer.`);
+  }
+  while (version < MIGRATIONS.length) {
+    const next = version + 1;
+    db.exec('BEGIN');
+    try {
+      db.exec(MIGRATIONS[version]);
+      db.exec(`PRAGMA user_version = ${next}`);
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw new Error(`Migracja v${next} nie powiodła się: ${(err as Error).message}`);
+    }
+    version = next;
+  }
+  return version;
+}
+
+/** Transakcja synchroniczna (node:sqlite jest synchroniczne, więc nic nie wejdzie pomiędzy). */
+export function tx<T>(db: Db, fn: () => T): T {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const out = fn();
+    db.exec('COMMIT');
+    return out;
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
 }
 
 export function audit(

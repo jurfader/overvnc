@@ -3,14 +3,16 @@ export class RateLimiter {
   private hits = new Map<string, { count: number; resetAt: number }>();
   private limit: number;
   private windowMs: number;
+  private timer: NodeJS.Timeout;
 
   constructor(limit: number, windowMs: number) {
     this.limit = limit;
     this.windowMs = windowMs;
-    setInterval(() => this.sweep(), windowMs).unref();
+    this.timer = setInterval(() => this.sweep(), windowMs);
+    this.timer.unref();
   }
 
-  /** Zwraca false, gdy limit został przekroczony. */
+  /** Rejestruje zdarzenie; zwraca false, gdy limit został przekroczony. */
   hit(key: string): boolean {
     const now = Date.now();
     const entry = this.hits.get(key);
@@ -24,6 +26,10 @@ export class RateLimiter {
 
   reset(key: string): void {
     this.hits.delete(key);
+  }
+
+  close(): void {
+    clearInterval(this.timer);
   }
 
   private sweep(): void {

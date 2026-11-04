@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { AlertCircle, LogIn } from 'lucide-react';
-import { api, ApiError } from '../api.ts';
+import { api, errorMessage } from '../api.ts';
 import { Button } from '../components.tsx';
 
 export function Login({ onLogin }: { onLogin: (user: string) => void }) {
@@ -17,8 +17,7 @@ export function Login({ onLogin }: { onLogin: (user: string) => void }) {
       const u = await api.login(username, password);
       onLogin(u.username);
     } catch (err) {
-      const status = err instanceof ApiError ? err.status : 0;
-      setError(status === 429 ? 'Zbyt wiele prób. Spróbuj za kilka minut.' : status === 401 ? 'Nieprawidłowy login lub hasło.' : 'Błąd połączenia z serwerem.');
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
     }

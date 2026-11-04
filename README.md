@@ -10,11 +10,22 @@ Własny system zdalnego zarządzania komputerami (Windows / macOS / Linux).
 | Katalog | Zawartość |
 |---|---|
 | `agent/` | Agent w Go — jedna binarka, działa jako usługa systemowa, łączy się wychodząco z serwerem |
-| `server/` | Serwer API + WebSocket (Fastify, `node:sqlite`), uruchamiany bezpośrednio przez Node ≥ 24 (bez kompilacji) |
+| `server/` | Serwer API + WebSocket (Fastify, `node:sqlite`, zod), uruchamiany bezpośrednio przez Node ≥ 24 (bez kompilacji) |
 | `panel/` | Panel webowy (React + Vite), po zbudowaniu serwowany przez serwer |
+| `docs/protocol.md` | Protokół agent ↔ serwer i kody błędów API |
+| `scripts/check.sh` | Pełna weryfikacja (formatowanie, typy, testy, kompilacja na 6 platform, e2e) — to samo co CI |
+| `scripts/e2e.sh` | Test end-to-end: prawdziwy serwer + prawdziwa binarka agenta |
 | `scripts/build-agents.sh` | Buduje agenta na 6 platform do `dist/agents/` |
 
-## Status: etap 1 — monitoring i inwentarz ✅
+## Testy
+
+```bash
+scripts/check.sh            # wszystko (ok. 1 min)
+cd server && npm test       # testy serwera (node:test)
+cd agent && go test ./...   # testy agenta
+```
+
+## Funkcje (v0.2.0)
 
 - rejestracja komputerów tokenem (jednorazowym lub wielokrotnym, z terminem ważności); każdy agent dostaje własny sekret
 - status online/offline na żywo, CPU / RAM / dyski / sieć / czas pracy / zalogowani użytkownicy (co 15 s)
@@ -69,12 +80,18 @@ Zmiana hasła / nowe konto: `npm run cli -- passwd <login>`.
 
 **Kopia zapasowa:** wystarczy katalog `DATA_DIR` (plik `overvnc.db`).
 
-## Plan dalszych etapów
+## Plan
 
-2. **Zdalne komendy** — PowerShell/bash z wynikiem na żywo, zapis w dzienniku
-3. **Pliki i instalacje** — przesyłanie plików, winget/brew/apt, restart/wyłączenie
-4. **Pulpit zdalny** — podgląd i sterowanie (najpierw JPEG po WebSocket, potem WebRTC); powiadomienie/zgoda użytkownika na komputerze
-5. **Wdrożenie** — 2FA dla adminów, auto-aktualizacja agenta, instalatory MSI/pkg/deb, podpisywanie kodu
+| Etap | Zakres | Status |
+|---|---|---|
+| 0 | Fundament: git, testy, CI, migracje, moduły serwera, protokół poleceń | ✅ v0.2.0 |
+| 1 | Organizacja: klienci, grupy i tagi; zespół z rolami; 2FA | ⏳ |
+| 2 | Praca zdalna: terminal interaktywny, procesy i usługi, zasilanie i Wake-on-LAN | |
+| 3 | Menedżer plików | |
+| 4 | Monitoring: historia i wykresy, stan bezpieczeństwa, historia zmian, alerty i powiadomienia | |
+| 5 | Automatyzacja: biblioteka skryptów, zadania zaplanowane, wdrażanie programów i aktualizacji | |
+| 6 | Pulpit zdalny + aplikacja w zasobniku (zgoda, czat) | |
+| 7 | Dystrybucja: instalatory z tokenem, auto-aktualizacja, podpisywanie kodu | |
 
 ## Bezpieczeństwo — zasady
 
