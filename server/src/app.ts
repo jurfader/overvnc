@@ -22,6 +22,7 @@ import { fileRoutes } from './routes/files.ts';
 import { updateRoutes } from './routes/updates.ts';
 import { desktopRoutes } from './routes/desktop.ts';
 import { UpdateStore } from './updates.ts';
+import { MetricsStore, RETENTION_MS } from './metrics.ts';
 import { loadOrCreateKey } from './crypto.ts';
 
 const CSP = [
@@ -42,13 +43,15 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
     bodyLimit: 1024 * 1024,
   });
 
-  const hub = new Hub(db);
+  const metrics = new MetricsStore(db);
+  const hub = new Hub(db, metrics);
   const ctx: Ctx = {
     config,
     db,
     hub,
     secretKey: loadOrCreateKey(config.keyFile),
     updates: new UpdateStore(db, config.updatesDir, config.releasePublicKey),
+    metrics,
     limits: {
       login: new RateLimiter(10, 15 * 60 * 1000), // 10 prób / 15 min / IP
       enroll: new RateLimiter(20, 15 * 60 * 1000),
@@ -69,8 +72,21 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
     poll = setInterval(check, 15 * 60_000);
     poll.unref();
   }
+  // przycinanie historii metryk wg retencji — raz na godzinę, pierwszy przebieg wkrótce po starcie
+  const pruneMetrics = () => {
+    try {
+      const removed = metrics.prune(RETENTION_MS);
+      if (removed) app.log.info(`historia metryk: usunięto ${removed} starych próbek`);
+    } catch (err) {
+      app.log.warn(`przycinanie historii metryk: ${(err as Error).message}`);
+    }
+  };
+  setTimeout(pruneMetrics, 60_000).unref();
+  const metricsPrune = setInterval(pruneMetrics, 3600_000);
+  metricsPrune.unref();
   app.addHook('onClose', async () => {
     clearInterval(poll);
+    clearInterval(metricsPrune);
     hub.close();
     ctx.limits.login.close();
     ctx.limits.enroll.close();

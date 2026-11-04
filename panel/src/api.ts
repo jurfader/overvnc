@@ -22,6 +22,19 @@ export interface TagRef {
   color: string;
 }
 
+/** Jedna próbka historii metryk (do wykresów). Procenty 0–100, sieć w bajtach/s. */
+export interface MetricSample {
+  ts: number;
+  cpu: number;
+  mem: number;
+  memUsed: number;
+  disk: number;
+  rx: number;
+  tx: number;
+}
+
+export type MetricRange = '1h' | '6h' | '24h' | '7d';
+
 export interface Agent {
   id: string;
   hostname: string;
@@ -319,6 +332,7 @@ export const api = {
     request<{ updated: number }>('POST', '/api/agents/bulk', body),
   refreshInventory: (id: string) => request<Ok>('POST', `/api/agents/${id}/refresh`, {}),
   deleteAgent: (id: string) => request<Ok>('DELETE', `/api/agents/${id}`),
+  metricsHistory: (id: string, range: MetricRange) => request<{ range: MetricRange; samples: MetricSample[] }>('GET', `/api/agents/${id}/metrics?range=${range}`),
 
   // praca zdalna
   processes: (id: string) => request<ProcInfo[]>('GET', `/api/agents/${id}/processes`),

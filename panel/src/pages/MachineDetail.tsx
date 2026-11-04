@@ -1,9 +1,10 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { Activity, ArrowLeft, Building2, CloudDownload, Cog, MonitorSmartphone, FolderOpen, LayoutDashboard, TerminalSquare, Clock, Cpu, HardDrive, Info, MemoryStick, Network, Package, Pencil, RefreshCw, Search, Trash2, Users } from 'lucide-react';
+import { Activity, ArrowLeft, Building2, CloudDownload, Cog, MonitorSmartphone, FolderOpen, LayoutDashboard, LineChart, TerminalSquare, Clock, Cpu, HardDrive, Info, MemoryStick, Network, Package, Pencil, RefreshCw, Search, Trash2, Users } from 'lucide-react';
 import { api, errorMessage, type Agent, type AgentDetail } from '../api.ts';
 import { Button, CardHead, ClientLabel, EmptyState, Meter, Modal, OsBadge, StatTile, Status, TagChip, toast } from '../components.tsx';
 import { useMe } from '../state.tsx';
 import { OrganizeModal } from './organize.tsx';
+import { MonitoringView } from './remote/MonitoringView.tsx';
 import { ProcessesView } from './remote/ProcessesView.tsx';
 import { ServicesView } from './remote/ServicesView.tsx';
 import { FilesView } from './remote/FilesView.tsx';
@@ -14,15 +15,17 @@ import { ago, bytes, dateTime, duration, platformLabel, rate } from '../format.t
 const DesktopView = lazy(() => import('./remote/DesktopView.tsx').then((m) => ({ default: m.DesktopView })));
 const TerminalView = lazy(() => import('./remote/TerminalView.tsx').then((m) => ({ default: m.TerminalView })));
 
-export type DetailTab = 'overview' | 'desktop' | 'terminal' | 'files' | 'processes' | 'services';
+export type DetailTab = 'overview' | 'monitoring' | 'desktop' | 'terminal' | 'files' | 'processes' | 'services';
 
-const TABS: { key: DetailTab; label: string; icon: typeof Info }[] = [
+// remote: zakładka wymaga uprawnienia do pracy zdalnej; Przegląd i Monitoring widzi każdy z dostępem do komputera
+const TABS: { key: DetailTab; label: string; icon: typeof Info; remote?: boolean }[] = [
   { key: 'overview', label: 'Przegląd', icon: LayoutDashboard },
-  { key: 'desktop', label: 'Pulpit', icon: MonitorSmartphone },
-  { key: 'terminal', label: 'Terminal', icon: TerminalSquare },
-  { key: 'files', label: 'Pliki', icon: FolderOpen },
-  { key: 'processes', label: 'Procesy', icon: Activity },
-  { key: 'services', label: 'Usługi', icon: Cog },
+  { key: 'monitoring', label: 'Monitoring', icon: LineChart },
+  { key: 'desktop', label: 'Pulpit', icon: MonitorSmartphone, remote: true },
+  { key: 'terminal', label: 'Terminal', icon: TerminalSquare, remote: true },
+  { key: 'files', label: 'Pliki', icon: FolderOpen, remote: true },
+  { key: 'processes', label: 'Procesy', icon: Activity, remote: true },
+  { key: 'services', label: 'Usługi', icon: Cog, remote: true },
 ];
 
 export function MachineDetail({ id, live, tab = 'overview', filePath = null }: { id: string; live: Agent | undefined; tab?: DetailTab; filePath?: string | null }) {
@@ -64,6 +67,8 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
   const inv = detail.inventory;
   const m = a.online ? a.metrics : null;
   const name = a.label || a.hostname;
+  const visibleTabs = TABS.filter((t) => !t.remote || remote);
+  const activeTab: DetailTab = visibleTabs.some((t) => t.key === tab) ? tab : 'overview';
 
   const refresh = async () => {
     setRefreshing(true);
@@ -144,30 +149,31 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
         </div>
       </header>
 
-      {remote && (
+      {visibleTabs.length > 1 && (
         <nav className="detail-tabs anim-rise" aria-label="Widoki komputera">
-          {TABS.map((t) => (
-            <a key={t.key} href={`#/m/${id}${t.key === 'overview' ? '' : '/' + t.key}`} className={`detail-tab ${tab === t.key ? 'on' : ''}`} aria-current={tab === t.key ? 'page' : undefined}>
+          {visibleTabs.map((t) => (
+            <a key={t.key} href={`#/m/${id}${t.key === 'overview' ? '' : '/' + t.key}`} className={`detail-tab ${activeTab === t.key ? 'on' : ''}`} aria-current={activeTab === t.key ? 'page' : undefined}>
               <t.icon /> {t.label}
             </a>
           ))}
         </nav>
       )}
 
-      {tab === 'desktop' && remote && (
+      {activeTab === 'monitoring' && <MonitoringView agent={a} />}
+      {activeTab === 'desktop' && (
         <Suspense fallback={<div className="center-page">Ładowanie…</div>}>
           <DesktopView agent={a} />
         </Suspense>
       )}
-      {tab === 'terminal' && remote && (
+      {activeTab === 'terminal' && (
         <Suspense fallback={<div className="center-page">Ładowanie terminala…</div>}>
           <TerminalView agent={a} />
         </Suspense>
       )}
-      {tab === 'files' && remote && <FilesView agent={a} initialPath={filePath} />}
-      {tab === 'processes' && remote && <ProcessesView agent={a} />}
-      {tab === 'services' && remote && <ServicesView agent={a} />}
-      {(tab === 'overview' || !remote) && (
+      {activeTab === 'files' && <FilesView agent={a} initialPath={filePath} />}
+      {activeTab === 'processes' && <ProcessesView agent={a} />}
+      {activeTab === 'services' && <ServicesView agent={a} />}
+      {activeTab === 'overview' && (
         <>
         <section className="grid grid-stats">
           <StatTile icon={Cpu} label="Procesor" hint={m?.load ? `load ${m.load.join(' / ')}` : `${m?.processes ?? '—'} procesów`}>

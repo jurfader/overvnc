@@ -58,6 +58,15 @@ export async function agentRoutes(app: FastifyInstance, ctx: Ctx) {
     return { ...hub.summary(id)!, inventory: inv.inventory_json ? JSON.parse(inv.inventory_json) : null };
   });
 
+  // historia metryk do wykresów monitoringu
+  const RANGES: Record<string, number> = { '1h': 3600_000, '6h': 6 * 3600_000, '24h': 24 * 3600_000, '7d': 7 * 24 * 3600_000 };
+  const MetricsQuery = z.object({ range: z.enum(['1h', '6h', '24h', '7d']).default('24h') });
+  app.get('/api/agents/:id/metrics', view, async (req) => {
+    const { id } = access(req);
+    const { range } = parse(MetricsQuery, req.query);
+    return { range, samples: ctx.metrics.history(id, Date.now() - RANGES[range]) };
+  });
+
   app.patch('/api/agents/:id', manage, async (req) => {
     const { id, clientId: curClient } = access(req);
     const body = parse(PatchBody, req.body);

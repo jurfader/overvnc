@@ -3,6 +3,7 @@ import type { WebSocket } from 'ws';
 import { audit, type Db } from './db.ts';
 import { HttpError } from './errors.ts';
 import type { Scope } from './context.ts';
+import type { MetricsStore } from './metrics.ts';
 import { canSeeClient, scopeSql } from './scope.ts';
 
 /**
@@ -138,11 +139,13 @@ export class Hub {
   private channels = new Map<string, ChannelEntry>();
   private nextChannel = 1;
   private db: Db;
+  private metrics?: MetricsStore;
   private pingTimer: NodeJS.Timeout;
   private closed = false;
 
-  constructor(db: Db) {
+  constructor(db: Db, metrics?: MetricsStore) {
     this.db = db;
+    this.metrics = metrics;
     this.pingTimer = setInterval(() => this.pingAll(), PING_INTERVAL_MS);
     this.pingTimer.unref();
   }
@@ -224,6 +227,7 @@ export class Hub {
       }
       case 'metrics': {
         this.db.prepare('UPDATE agents SET metrics_json = ?, last_seen = ? WHERE id = ?').run(JSON.stringify(msg.data ?? {}), now, agentId);
+        this.metrics?.record(agentId, (msg.data ?? null) as Record<string, unknown> | null);
         this.broadcastAgent(agentId, { type: 'agent_metrics', id: agentId, data: msg.data });
         break;
       }

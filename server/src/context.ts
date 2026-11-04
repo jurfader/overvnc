@@ -4,6 +4,7 @@ import type { Hub } from './hub.ts';
 import type { RateLimiter } from './ratelimit.ts';
 import type { Role } from './permissions.ts';
 import type { UpdateStore } from './updates.ts';
+import type { MetricsStore } from './metrics.ts';
 
 /** Zależności współdzielone przez wszystkie moduły tras. */
 export interface Ctx {
@@ -14,6 +15,8 @@ export interface Ctx {
   secretKey: Buffer;
   /** Wydania agenta i polityka aktualizacji. */
   updates: UpdateStore;
+  /** Historia metryk komputerów (wykresy monitoringu). */
+  metrics: MetricsStore;
   /** Wysyła „sprawdź aktualizację” do nieaktualnych komputerów (ustawiane przez trasy aktualizacji). */
   rollout?: (ids?: string[]) => number;
   limits: {

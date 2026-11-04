@@ -150,4 +150,20 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE clients ADD COLUMN consent_mode TEXT NOT NULL DEFAULT 'notify';
   `,
+
+  // 5 — historia metryk (wykresy): próbki ~1/min, przycinane wg retencji (v0.8.0)
+  `
+  CREATE TABLE metrics_history (
+    agent_id     TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    ts           INTEGER NOT NULL,
+    cpu          REAL NOT NULL,
+    mem_percent  REAL NOT NULL,
+    mem_used     INTEGER NOT NULL,
+    disk_percent REAL NOT NULL,
+    net_rx       REAL NOT NULL,
+    net_tx       REAL NOT NULL,
+    PRIMARY KEY (agent_id, ts)
+  );
+  CREATE INDEX metrics_history_ts ON metrics_history(ts);
+  `,
 ];
