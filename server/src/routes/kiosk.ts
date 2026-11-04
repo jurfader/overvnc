@@ -14,6 +14,9 @@ const MessageBody = z.object({
   seconds: z.number().int().min(5).max(3600).default(60),
 });
 
+const KioskParams = z.object({ id: z.uuid(), action: z.enum(['service-on', 'service-off', 'extend']) });
+const KIOSK_AUDIT: Record<string, string> = { 'service-on': 'kiosk.service_on', 'service-off': 'kiosk.service_off', extend: 'kiosk.extend_eval' };
+
 const SHOT_CACHE_MS = 2000;
 const SHOT_AUDIT_EVERY_MS = 10 * 60_000;
 
@@ -83,6 +86,15 @@ export async function kioskRoutes(app: FastifyInstance, ctx: Ctx) {
       .header('X-Captured-At', String(shot.at))
       .header('X-Screen-Size', `${shot.w}x${shot.h}`)
       .send(shot.jpeg);
+  });
+
+  // ---------- Windows: tryb serwisowy (UWF) i przedłużanie wersji próbnej — każda akcja kończy się restartem ----------
+  app.post('/api/agents/:id/kiosk/:action', remote, async (req) => {
+    const { id, action } = parse(KioskParams, req.params);
+    assertAgentAccess(db, req.user!, id);
+    const r = await hub.request<{ status: string; restarts?: number }>(id, 'kiosk.action', { action }, { capability: 'kiosk.action', timeoutMs: 120_000 });
+    audit(db, actorOf(req), KIOSK_AUDIT[action], id, r, req.ip);
+    return r;
   });
 
   // ---------- komunikat na ekranie komputera ----------

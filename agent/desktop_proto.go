@@ -92,6 +92,7 @@ type InputEvent struct {
 	Code    string  `json:"code,omitempty"` // KeyboardEvent.code
 	Quality string  `json:"quality,omitempty"`
 	Cursor  *bool   `json:"cursor,omitempty"` // cfg: kursor w obrazie (false = przeglądarka rysuje własny)
+	Text    string  `json:"text,omitempty"`   // clip: tekst do wklejenia (schowek komputera + Ctrl+V)
 	Monitor *int    `json:"monitor,omitempty"`
 }
 

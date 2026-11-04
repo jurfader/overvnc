@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -581,4 +582,67 @@ func showScreenMessage(title, text string, seconds int) error {
 	}
 	_, err = wtsSendMessage(sid, title, text, mbOK|mbIconInfo|mbSetForeground|mbSystemModal, uint32(seconds), false)
 	return err
+}
+
+// ---------- schowek ----------
+
+var (
+	kernel32             = windows.NewLazySystemDLL("kernel32.dll")
+	procOpenClipboard    = user32.NewProc("OpenClipboard")
+	procEmptyClipboard   = user32.NewProc("EmptyClipboard")
+	procSetClipboardData = user32.NewProc("SetClipboardData")
+	procCloseClipboard   = user32.NewProc("CloseClipboard")
+	procGlobalAlloc      = kernel32.NewProc("GlobalAlloc")
+	procGlobalLock       = kernel32.NewProc("GlobalLock")
+	procGlobalUnlock     = kernel32.NewProc("GlobalUnlock")
+	procGlobalFree       = kernel32.NewProc("GlobalFree")
+	procRtlMoveMemory    = kernel32.NewProc("RtlMoveMemory")
+)
+
+const (
+	cfUnicodeText = 13
+	gmemMoveable  = 0x0002
+)
+
+// setClipboard umieszcza tekst (UTF-16, końce linii CRLF) w schowku stacji okien pomocnika — tej samej,
+// z której korzystają programy użytkownika.
+func (b *gdiBackend) setClipboard(text string) error {
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\n", "\r\n")
+	u, err := windows.UTF16FromString(strings.ReplaceAll(text, "\x00", ""))
+	if err != nil {
+		return err
+	}
+	// schowek może być chwilowo zajęty przez inny program
+	opened := false
+	for range 10 {
+		if r, _, _ := procOpenClipboard.Call(0); r != 0 {
+			opened = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !opened {
+		return errors.New("schowek jest zajęty przez inny program")
+	}
+	defer procCloseClipboard.Call()
+	if r, _, err := procEmptyClipboard.Call(); r == 0 {
+		return fmt.Errorf("EmptyClipboard: %v", err)
+	}
+	h, _, err := procGlobalAlloc.Call(gmemMoveable, uintptr(len(u)*2))
+	if h == 0 {
+		return fmt.Errorf("GlobalAlloc: %v", err)
+	}
+	p, _, err := procGlobalLock.Call(h)
+	if p == 0 {
+		procGlobalFree.Call(h)
+		return fmt.Errorf("GlobalLock: %v", err)
+	}
+	// kopiowanie przez system — bez zamiany adresu z wywołania na wskaźnik Go
+	procRtlMoveMemory.Call(p, uintptr(unsafe.Pointer(&u[0])), uintptr(len(u)*2))
+	procGlobalUnlock.Call(h)
+	if r, _, err := procSetClipboardData.Call(cfUnicodeText, h); r == 0 {
+		procGlobalFree.Call(h) // po udanym SetClipboardData pamięć należy do systemu
+		return fmt.Errorf("SetClipboardData: %v", err)
+	}
+	return nil
 }

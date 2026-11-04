@@ -855,3 +855,11 @@ textarea.pole.editor-area { font: 12.5px/1.55 var(--font-mono); height: 58vh; mi
 @media (max-width: 720px) {
   .kiosk-card .card-head .toolbar { width: 100%; }
 }
+
+/* ---------- Windows: licencja i ochrona przed zapisem ---------- */
+.win-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 18px; }
+.win-block { display: grid; gap: 10px; align-content: start; justify-items: start; }
+.win-block .meter { width: 100%; }
+.win-head { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: rgb(var(--ink-2)); text-transform: uppercase; letter-spacing: 0.04em; }
+.win-head svg { width: 15px; height: 15px; color: rgb(var(--primary)); }
+.win-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }

@@ -26,7 +26,9 @@ var errUnauthorized = errors.New("serwer odrzucił dane agenta (agent usunięty 
 func runAgent(ctx context.Context, cfgPath string, cfg *Config) {
 	logger.Infof("OVERVNC Agent %s, serwer: %s", version, cfg.ServerURL)
 	setUpdateContext(cfg, cfgPath)
+	setKioskContext(cfgPath)
 	go updateLoop(ctx, cfg, cfgPath)
+	go resumeKioskTask(ctx) // np. przedłużanie okresu próbnego przerwane restartem
 	backoff := time.Second
 	for {
 		started := time.Now()
@@ -200,6 +202,8 @@ func session(parent context.Context, cfg *Config, cfgPath string) error {
 			case <-metricsT.C:
 				err = send("metrics", mc.collect(ctx))
 			case <-invT.C:
+				err = send("inventory", collectInventory(ctx))
+			case <-inventoryNow:
 				err = send("inventory", collectInventory(ctx))
 			}
 			if err != nil {

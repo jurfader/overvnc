@@ -30,8 +30,10 @@ const Event = z.discriminatedUnion('t', [
     cursor: z.boolean().optional(),
   }),
   z.object({ t: z.literal('kf') }),
+  // wklejenie: tekst do schowka komputera i Ctrl+V (to też wejście — w trybie podglądu zablokowane)
+  z.object({ t: z.literal('clip'), text: z.string().min(1).max(100_000) }),
 ]);
-const INPUT_TYPES = new Set(['m', 'b', 'w', 'k']);
+const INPUT_TYPES = new Set(['m', 'b', 'w', 'k', 'clip']);
 const IDLE_MS = 60 * 60 * 1000;
 const MAX_BUFFERED = 16 * 1024 * 1024;
 

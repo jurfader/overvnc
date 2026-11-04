@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -164,5 +165,30 @@ func TestCapabilitiesSorted(t *testing.T) {
 	caps := capabilities()
 	if len(caps) == 0 || !strings.Contains(strings.Join(caps, ","), "inventory.refresh") {
 		t.Errorf("capabilities: %v", caps)
+	}
+}
+
+func TestKioskTaskState(t *testing.T) {
+	setKioskContext(filepath.Join(t.TempDir(), "agent.json"))
+	if loadKioskTask() != nil {
+		t.Fatal("brak zadania na starcie")
+	}
+	want := &KioskTask{Kind: "extend", Step: "rearm", Started: 1, StepBoot: 42, Reenable: true, GraceBefore: 1440}
+	if err := saveKioskTask(want); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadKioskTask(); got == nil || *got != *want {
+		t.Fatalf("odczyt zadania: %+v", got)
+	}
+	if _, err := os.Stat(kioskFile("kiosk-task.json.tmp")); !os.IsNotExist(err) {
+		t.Error("plik tymczasowy nie powinien zostać")
+	}
+	clearKioskTask()
+	if loadKioskTask() != nil {
+		t.Fatal("zadanie powinno zniknąć")
+	}
+	saveKioskResult("extend", true, "okres próbny przedłużony")
+	if r := loadKioskResult(); r == nil || !r.OK || r.Message != "okres próbny przedłużony" {
+		t.Fatalf("wynik zadania: %+v", r)
 	}
 }

@@ -102,3 +102,25 @@ test('kiosk: agent bez obsługi zrzutów — czytelny błąd', async (t) => {
   const r = await s.app.inject({ url: `/api/agents/${agentId}/screenshot`, cookies: c });
   assert.equal(r.statusCode, 501);
 });
+
+test('kiosk: tryb serwisowy i przedłużanie wersji próbnej — do agenta, dziennik, uprawnienia', async (t) => {
+  const e = await env('none');
+  t.after(() => (e.agent.close(), e.s.close()));
+  const actions: string[] = [];
+  e.agent.handlers['kiosk.action'] = (d) => (actions.push(d.action), { status: 'restarting', restarts: d.action === 'extend' ? 2 : 1 });
+  e.agent.hello(['screen.capture', 'screen.message', 'kiosk.action']);
+  await until(() => s_caps(e).includes('kiosk.action'));
+  const r = await e.s.app.inject({ method: 'POST', url: `/api/agents/${e.agentId}/kiosk/extend`, cookies: e.c });
+  assert.equal(r.statusCode, 200);
+  assert.deepEqual(r.json(), { status: 'restarting', restarts: 2 });
+  assert.deepEqual(actions, ['extend']);
+  assert.ok(e.s.db.prepare("SELECT 1 FROM audit_log WHERE action = 'kiosk.extend_eval'").get());
+  assert.equal((await e.s.app.inject({ method: 'POST', url: `/api/agents/${e.agentId}/kiosk/format-c`, cookies: e.c })).statusCode, 400);
+  const viewer = (await e.s.createMember(e.c, { username: 'podglad2', role: 'viewer' })).cookies;
+  assert.equal((await e.s.app.inject({ method: 'POST', url: `/api/agents/${e.agentId}/kiosk/service-on`, cookies: viewer })).statusCode, 403);
+  assert.deepEqual(actions, ['extend'], 'odrzucone żądania nie dotarły do agenta');
+});
+
+function s_caps(e: { s: any; agentId: string }): string[] {
+  return e.s.ctx.hub.summary(e.agentId)?.capabilities ?? [];
+}

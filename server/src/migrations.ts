@@ -205,4 +205,10 @@ export const MIGRATIONS: string[] = [
     ('Wysokie obciążenie procesora', 'cpu', 95, 15, CAST(strftime('%s', 'now') AS INTEGER) * 1000),
     ('Mało wolnej pamięci', 'mem', 95, 15, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
   `,
+
+  // 7 — alert „kończy się wersja próbna Windows” (próg w dniach) (v0.12.0)
+  `
+  INSERT INTO alert_rules (name, kind, threshold, duration_min, created_at) VALUES
+    ('Kończy się wersja próbna Windows', 'license', 14, 0, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+  `,
 ];

@@ -66,13 +66,16 @@ test('pulpit: klatki do przeglądarki, potwierdzenia do komputera, wejście, zgo
   d.ws.send(JSON.stringify({ t: 'm', x: 0.5, y: 0.25 }));
   d.ws.send(JSON.stringify({ t: 'k', code: 'KeyA', d: true }));
   d.ws.send(JSON.stringify({ t: 'k', code: 'KeyA; rm -rf /', d: true })); // odrzucone przez walidację
+  d.ws.send(JSON.stringify({ t: 'clip', text: 'zażółć\ngęślą jaźń' }));
   d.ws.send(JSON.stringify({ t: 'm', x: 7, y: 0 })); // poza zakresem — odrzucone
   d.ws.send('to nie JSON');
   await until(() => e.chan.data.length >= 2);
   await sleep(50);
+  await until(() => e.chan.data.length >= 3);
   assert.deepEqual(e.chan.data, [
     { t: 'm', x: 0.5, y: 0.25 },
     { t: 'k', code: 'KeyA', d: true },
+    { t: 'clip', text: 'zażółć\ngęślą jaźń' },
   ]);
 
   d.ws.close();
@@ -90,6 +93,7 @@ test('pulpit: tryb podglądu blokuje wejście na serwerze (ustawienia nadal dzia
   assert.equal(e.chan.open.viewOnly, true);
   d.ws.send(JSON.stringify({ t: 'b', x: 0.1, y: 0.1, b: 0, d: true }));
   d.ws.send(JSON.stringify({ t: 'k', code: 'Enter', d: true }));
+  d.ws.send(JSON.stringify({ t: 'clip', text: 'tajne' }));
   d.ws.send(JSON.stringify({ t: 'cfg', quality: 'low' }));
   await until(() => e.chan.data.length === 1);
   await sleep(50);

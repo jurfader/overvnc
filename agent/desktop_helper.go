@@ -23,6 +23,8 @@ type desktopBackend interface {
 	setCursor(on bool)
 	// interval: minimalny odstęp między klatkami dla tej metody przechwytywania
 	interval() time.Duration
+	// setClipboard umieszcza tekst w schowku komputera (sesji użytkownika)
+	setClipboard(text string) error
 }
 
 // errNoChange — obraz się nie zmienił; nie ma czego wysyłać (DXGI wie to bez kopiowania ekranu).
@@ -168,6 +170,15 @@ func runDesktopHelper() int {
 					}
 				case "kf":
 					enc.reset()
+				case "clip":
+					// tekst do schowka komputera, potem Ctrl+V — wklejanie w dowolnym programie
+					if err := be.setClipboard(ev.Text); err != nil {
+						out.log("schowek: %v", err)
+						continue
+					}
+					for _, k := range []InputEvent{{T: "k", Code: "ControlLeft", D: true}, {T: "k", Code: "KeyV", D: true}, {T: "k", Code: "KeyV"}, {T: "k", Code: "ControlLeft"}} {
+						_ = be.input(k, monitor())
+					}
 				default:
 					if err := be.input(ev, monitor()); err != nil && time.Since(lastErr) > 5*time.Second {
 						lastErr = time.Now()

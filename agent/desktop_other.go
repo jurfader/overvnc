@@ -124,6 +124,12 @@ func (s *syntheticBackend) input(ev InputEvent, m MonitorInfo) error {
 
 func (s *syntheticBackend) close() {}
 
+// setClipboard — tryb testowy: długość tekstu trafia do logu agenta.
+func (s *syntheticBackend) setClipboard(text string) error {
+	helperLogHook(fmt.Sprintf("schowek: %d znaków", len([]rune(text))))
+	return nil
+}
+
 func (s *syntheticBackend) setCursor(bool)          {}
 func (s *syntheticBackend) interval() time.Duration { return 66 * time.Millisecond }
 

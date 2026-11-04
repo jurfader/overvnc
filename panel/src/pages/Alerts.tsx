@@ -1,5 +1,23 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { AlertTriangle, BellRing, Check, CheckCircle2, Cpu, HardDrive, History, MemoryStick, Pencil, Plus, Send, Settings2, Smartphone, Trash2, WifiOff, type LucideIcon } from 'lucide-react';
+import {
+  AlertTriangle,
+  BellRing,
+  Check,
+  CheckCircle2,
+  Cpu,
+  HardDrive,
+  History,
+  KeyRound,
+  MemoryStick,
+  Pencil,
+  Plus,
+  Send,
+  Settings2,
+  Smartphone,
+  Trash2,
+  WifiOff,
+  type LucideIcon,
+} from 'lucide-react';
 import { api, errorMessage, type AlertItem, type AlertKind, type AlertRule, type AlertRuleInput, type NotificationSettings } from '../api.ts';
 import { Badge, Button, CardHead, EmptyState, Field, Modal, StatTile, Tabs, toast } from '../components.tsx';
 import { useAlerts, useMe, useOrg } from '../state.tsx';
@@ -12,17 +30,20 @@ export const KIND_ICON: Record<AlertKind, LucideIcon> = {
   cpu: Cpu,
   mem: MemoryStick,
   disk: HardDrive,
+  license: KeyRound,
 };
 const KIND_LABEL: Record<AlertKind, string> = {
   offline: 'Komputer offline',
   cpu: 'Procesor',
   mem: 'Pamięć',
   disk: 'Dysk',
+  license: 'Licencja Windows',
 };
 
 /** Krótki opis wartości alertu, np. „96% · D:\”. */
 export function alertValue(a: Pick<AlertItem, 'kind' | 'value' | 'detail'>): string {
   if (a.kind === 'offline') return 'brak połączenia';
+  if (a.kind === 'license') return [a.value === null ? '' : `zostało ${Math.round(a.value)} dni`, a.detail].filter(Boolean).join(' · ');
   const v = a.value === null ? '' : `${Math.round(a.value)}%`;
   return [v, a.detail].filter(Boolean).join(' · ');
 }
@@ -176,6 +197,7 @@ export function AlertTable({ items, history = false, empty, compact = false }: {
 function describeRule(r: AlertRule): string {
   const dur = r.durationMin ? ` przez ${r.durationMin} min` : ' (od razu)';
   if (r.kind === 'offline') return `Brak połączenia przez ${r.durationMin} min`;
+  if (r.kind === 'license') return `Wersja próbna Windows: ≤ ${r.threshold} dni do końca`;
   return `${KIND_LABEL[r.kind]} ≥ ${r.threshold}%${dur}`;
 }
 
@@ -233,7 +255,9 @@ function RulesView() {
                     </div>
                   </td>
                   <td className="small s-full">{describeRule(r)}</td>
-                  <td className="small ink-2 s-meta" data-label="Komputery:">{r.clientName ?? 'wszystkie'}</td>
+                  <td className="small ink-2 s-meta" data-label="Komputery:">
+                    {r.clientName ?? 'wszystkie'}
+                  </td>
                   <td className="center-text s-meta" data-label="Push">
                     <input type="checkbox" className="cb" aria-label="Powiadomienie push" checked={r.notify} onChange={(e) => toggle(r, { notify: e.target.checked })} />
                   </td>
@@ -288,6 +312,11 @@ function RulesView() {
 }
 
 const KIND_OPTIONS: { value: AlertKind; label: string; hint: string }[] = [
+  {
+    value: 'license',
+    label: 'Kończy się wersja próbna Windows',
+    hint: 'Ewaluacyjny Windows (90 dni) kończy się za podaną liczbę dni lub mniej.',
+  },
   {
     value: 'offline',
     label: 'Komputer offline',
@@ -378,7 +407,8 @@ function RuleModal({ rule, onClose, onSaved }: { rule: AlertRule | null | undefi
                   onChange={() =>
                     set({
                       kind: o.value,
-                      durationMin: o.value === 'offline' ? Math.max(1, f.durationMin || 10) : f.durationMin,
+                      durationMin: o.value === 'offline' ? Math.max(1, f.durationMin || 10) : o.value === 'license' ? 0 : f.durationMin,
+                      threshold: o.value === 'license' ? (f.kind === 'license' ? f.threshold : 14) : f.kind === 'license' ? 90 : f.threshold,
                     })
                   }
                 />
@@ -395,16 +425,18 @@ function RuleModal({ rule, onClose, onSaved }: { rule: AlertRule | null | undefi
         </Field>
         <div className="form-2">
           {f.kind !== 'offline' && (
-            <Field label="Próg (%)">
-              <input className="pole" type="number" min={1} max={100} value={f.threshold} onChange={(e) => set({ threshold: Number(e.target.value) })} required />
+            <Field label={f.kind === 'license' ? 'Alert, gdy do końca zostało dni (≤)' : 'Próg (%)'}>
+              <input className="pole" type="number" min={1} max={f.kind === 'license' ? 90 : 100} value={f.threshold} onChange={(e) => set({ threshold: Number(e.target.value) })} required />
             </Field>
           )}
-          <Field
-            label={f.kind === 'offline' ? 'Offline dłużej niż (min)' : 'Musi trwać (min, 0 = od razu)'}
-            hint={f.kind === 'offline' ? 'Kioski wyłączane na noc? Ustaw dłuższy czas albo wyłącz push.' : undefined}
-          >
-            <input className="pole" type="number" min={f.kind === 'offline' ? 1 : 0} max={1440} value={f.durationMin} onChange={(e) => set({ durationMin: Number(e.target.value) })} required />
-          </Field>
+          {f.kind !== 'license' && (
+            <Field
+              label={f.kind === 'offline' ? 'Offline dłużej niż (min)' : 'Musi trwać (min, 0 = od razu)'}
+              hint={f.kind === 'offline' ? 'Kioski wyłączane na noc? Ustaw dłuższy czas albo wyłącz push.' : undefined}
+            >
+              <input className="pole" type="number" min={f.kind === 'offline' ? 1 : 0} max={1440} value={f.durationMin} onChange={(e) => set({ durationMin: Number(e.target.value) })} required />
+            </Field>
+          )}
         </div>
         <Field label="Komputery">
           <select className="pole" value={f.clientId ?? ''} onChange={(e) => set({ clientId: e.target.value ? Number(e.target.value) : null })}>

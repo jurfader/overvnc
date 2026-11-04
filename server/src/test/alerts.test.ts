@@ -184,3 +184,24 @@ test('alerty: zakres konta, potwierdzanie, uprawnienia do reguł', async (t) => 
   assert.equal((await e.s.app.inject({ method: 'DELETE', url: `/api/alert-rules/${created.json().id}`, cookies: e.c })).statusCode, 200);
   assert.equal((await e.open()).length, 0, 'usunięcie reguły zamyka jej alerty');
 });
+
+test('alerty: kończy się wersja próbna Windows — z inwentarza, zamknięcie po przedłużeniu', async (t) => {
+  const e = await env();
+  t.after(e.s.close);
+  const inv = (lic: object) => ({ host: { hostname: 'pc-a', os: 'windows' }, windows: { license: lic } });
+  // 10 dni do końca (próg domyślny 14) — alert
+  e.s.ctx.hub.storeInventory(e.a, inv({ evaluation: true, graceMinutes: 10 * 1440 + 30, evalEnd: Date.UTC(2026, 10, 14), rearmsLeft: 3 }));
+  const [al] = (await e.open()).filter((x) => x.kind === 'license');
+  assert.ok(al, 'alert licencji otwarty');
+  assert.equal(al.value, 10);
+  assert.match(al.detail, /przedłużeń: 3/);
+  // aktywowany Windows (nie ewaluacyjny) — żadnego alertu
+  e.s.ctx.hub.storeInventory(e.b, inv({ evaluation: false, graceMinutes: 0, rearmsLeft: 1001 }));
+  assert.ok(!(await e.open()).some((x) => x.agentId === e.b));
+  // po przedłużeniu: 89 dni — alert zamknięty
+  e.s.ctx.hub.storeInventory(e.a, inv({ evaluation: true, graceMinutes: 89 * 1440, rearmsLeft: 2 }));
+  assert.ok(!(await e.open()).some((x) => x.kind === 'license'));
+  // reguła licencji: próg w dniach 1–90
+  const bad = await e.s.app.inject({ method: 'POST', url: '/api/alert-rules', cookies: e.c, payload: { name: 'L', kind: 'license', threshold: 120 } });
+  assert.equal(bad.statusCode, 400);
+});

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Eye, Keyboard, Lock, Maximize2, Minimize2, MonitorSmartphone, MousePointer2, Plug, RotateCcw, ShieldAlert, ZoomOut } from 'lucide-react';
+import { ClipboardPaste, Eye, Keyboard, Lock, Maximize2, Minimize2, MonitorSmartphone, MousePointer2, Plug, RotateCcw, ShieldAlert, ZoomOut } from 'lucide-react';
 import type { Agent } from '../../api.ts';
-import { Badge, Button, EmptyState } from '../../components.tsx';
+import { Badge, Button, EmptyState, toast } from '../../components.tsx';
 import { bytes } from '../../format.ts';
 import { keyForChar } from './keytext.ts';
 
@@ -287,6 +287,14 @@ export function DesktopView({ agent }: { agent: Agent }) {
       if (lines) send({ t: 'w', dy: Math.max(-2400, Math.min(2400, Math.sign(lines) * Math.max(120, Math.round(Math.abs(lines) / 100) * 120))) });
     };
     const onKey = (d: boolean) => (e: KeyboardEvent) => {
+      // Ctrl+V / Cmd+V: przeglądarka odda tekst ze schowka (zdarzenie paste) — wkleimy go przez schowek komputera
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV' && !viewOnlyRef.current) {
+        // Cmd na Macu trafia do komputera jako klawisz Windows — zwolnij go, inaczej wyszłoby Win+Ctrl+V
+        for (const code of ['MetaLeft', 'MetaRight']) {
+          if (pressedKeys.current.delete(code)) send({ t: 'k', code, d: false });
+        }
+        return;
+      }
       e.preventDefault(); // skróty trafiają do zdalnego komputera, nie do przeglądarki
       if (!e.code || viewOnlyRef.current) return;
       if (d) pressedKeys.current.add(e.code);
@@ -413,6 +421,13 @@ export function DesktopView({ agent }: { agent: Agent }) {
     const down = onKey(true);
     const up = onKey(false);
     const noMenu = (e: Event) => e.preventDefault();
+    const onPaste = (e: ClipboardEvent) => {
+      if (document.activeElement !== c || viewOnlyRef.current) return;
+      e.preventDefault();
+      const text = e.clipboardData?.getData('text/plain') ?? '';
+      if (text) send({ t: 'clip', text: text.slice(0, 100_000) });
+    };
+    window.addEventListener('paste', onPaste);
     c.addEventListener('pointermove', onMove);
     c.addEventListener('pointerdown', onDown);
     c.addEventListener('pointerup', onUp);
@@ -441,6 +456,7 @@ export function DesktopView({ agent }: { agent: Agent }) {
       st.removeEventListener('pointermove', onTouchMove);
       st.removeEventListener('pointerup', onTouchUp);
       st.removeEventListener('pointercancel', onTouchUp);
+      window.removeEventListener('paste', onPaste);
     };
   }, [state, releaseAll]);
 
@@ -457,6 +473,18 @@ export function DesktopView({ agent }: { agent: Agent }) {
     else typeText(v.startsWith(SENTINEL) ? v.slice(SENTINEL.length) : v.replaceAll('\u00a0', ''));
     resetInput();
   };
+  /** Przycisk „Wklej”: tekst ze schowka tego komputera -> schowek zdalnego komputera + Ctrl+V. */
+  const pasteFromClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text) return toast('Schowek jest pusty', 'err');
+      send({ t: 'clip', text: text.slice(0, 100_000) });
+      toast(`Wklejono ${text.length} ${text.length === 1 ? 'znak' : 'znaków'}`);
+    } catch {
+      toast('Przeglądarka nie pozwoliła odczytać schowka — kliknij obraz pulpitu i naciśnij Ctrl+V.', 'err');
+    }
+  };
+
   const openKeyboard = () => {
     resetInput();
     keyInput.current?.focus(); // w obsłudze dotknięcia — inaczej telefon nie pokaże klawiatury
@@ -544,6 +572,7 @@ export function DesktopView({ agent }: { agent: Agent }) {
           <Button size="sm" variant={viewOnly ? 'outline' : 'ghost'} icon={viewOnly ? Eye : MousePointer2} onClick={() => setViewOnly((v) => !v)} title="Przełącz podgląd / sterowanie">
             <span className="btn-label">{viewOnly ? 'Podgląd' : 'Sterowanie'}</span>
           </Button>
+          {state === 'ready' && !viewOnly && <Button size="sm" variant="ghost" icon={ClipboardPaste} title="Wklej tekst ze schowka (albo Ctrl+V na obrazie)" onClick={() => void pasteFromClipboard()} />}
           {zoom.s > 1 && <Button size="sm" variant="ghost" icon={ZoomOut} title="Pomniejsz (cały ekran)" onClick={() => setZoom(NO_ZOOM)} />}
           <Button size="sm" variant="ghost" icon={RotateCcw} title="Połącz ponownie" onClick={() => setSession((n) => n + 1)} />
           <Button size="sm" variant="ghost" icon={fullscreen || cssFull ? Minimize2 : Maximize2} title={fullscreen || cssFull ? 'Zamknij pełny ekran' : 'Pełny ekran'} onClick={toggleFullscreen} />
@@ -589,7 +618,18 @@ export function DesktopView({ agent }: { agent: Agent }) {
               send({ t: 'k', code: e.code, d: false });
             }
           }}
-          onInput={(e) => !composing.current && flushInput(e.currentTarget.value)}
+          onInput={(e) => {
+            if (composing.current) return;
+            // wklejenie z klawiatury telefonu — przez schowek komputera (szybko, z polskimi znakami i liniami)
+            if ((e.nativeEvent as InputEvent).inputType === 'insertFromPaste') {
+              const v = e.currentTarget.value;
+              const text = v.startsWith(SENTINEL) ? v.slice(SENTINEL.length) : v.replaceAll('\u00a0', '');
+              if (text && !viewOnly) send({ t: 'clip', text: text.slice(0, 100_000) });
+              resetInput();
+              return;
+            }
+            flushInput(e.currentTarget.value);
+          }}
           onCompositionStart={() => (composing.current = true)}
           onCompositionEnd={(e) => {
             composing.current = false;
@@ -620,6 +660,9 @@ export function DesktopView({ agent }: { agent: Agent }) {
           <button type="button" className={`term-key wide ${keyboardOpen ? 'on' : ''}`} onClick={() => (keyboardOpen ? keyInput.current?.blur() : openKeyboard())}>
             <Keyboard size={15} /> Klawiatura
           </button>
+          <button type="button" className="term-key wide" onPointerDown={(e) => e.preventDefault()} onClick={() => void pasteFromClipboard()}>
+            <ClipboardPaste size={15} /> Wklej
+          </button>
           {MOD_KEYS.map((m) => (
             <button
               key={m.key}
@@ -647,7 +690,7 @@ export function DesktopView({ agent }: { agent: Agent }) {
         </div>
       )}
       <div className="term-foot small muted">
-        <span className="mouse-only">Kliknij obraz, aby sterować klawiaturą (skróty klawiszowe trafiają do zdalnego komputera). </span>
+        <span className="mouse-only">Kliknij obraz, aby sterować klawiaturą (skróty klawiszowe trafiają do zdalnego komputera, Ctrl+V wkleja tekst z Twojego schowka). </span>
         <span className="touch-only">Dotknij — klik · przytrzymaj — prawy klik · przeciągnij — przeciąganie · dwa palce — przewijanie · rozsuń palce — powiększenie. </span>
         Sesja jest zapisywana w dzienniku zdarzeń.
       </div>

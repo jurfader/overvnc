@@ -106,6 +106,7 @@ echo "✔ pliki: wysłanie 3,5 MB, pobranie (zgodne bajt w bajt), ZIP, edycja z 
       frames++;
       ws.send("{\"t\":\"ack\"}");
       if (frames === 3) ws.send("{\"t\":\"k\",\"code\":\"KeyQ\",\"d\":true}");
+      if (frames === 4) ws.send(JSON.stringify({ t: "clip", text: "zażółć gęślą" }));
       if (frames === 6 && info) { clearTimeout(t); ws.close(); }
     }
   });
@@ -113,7 +114,10 @@ echo "✔ pliki: wysłanie 3,5 MB, pobranie (zgodne bajt w bajt), ZIP, edycja z 
 ') || fail "pulpit zdalny"
 for i in $(seq 50); do grep -q "wejście k code=KeyQ" "$WORK/agent.log" && break; sleep 0.1; done
 grep -q "wejście k code=KeyQ" "$WORK/agent.log" || fail "klawisz nie dotarł do komputera"
-echo "✔ pulpit: monitory, klatki z potwierdzeniami (tempo), klawisz dotarł do komputera"
+for i in $(seq 50); do grep -q "schowek: 12 znaków" "$WORK/agent.log" && break; sleep 0.1; done
+grep -q "schowek: 12 znaków" "$WORK/agent.log" || fail "tekst nie trafił do schowka komputera"
+grep -q "wejście k code=KeyV b=0 d=true" "$WORK/agent.log" || fail "brak Ctrl+V po wklejeniu"
+echo "✔ pulpit: monitory, klatki z potwierdzeniami (tempo), klawisz i wklejenie ze schowka dotarły do komputera"
 
 # kiosk: zrzut ekranu (osobny proces pomocnika w trybie „snapshot”) i komunikat na ekranie
 CID=$(curl -sf -b "$J" -X POST -H 'content-type: application/json' -d '{"name":"Kioski e2e","consentMode":"none"}' "$B/api/clients" | json .id) || fail "klient kiosku"

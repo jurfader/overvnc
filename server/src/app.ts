@@ -53,6 +53,7 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
   const notifier = new Notifier(db, secretKey, (msg) => app.log.warn(msg));
   const alerts = new AlertEngine(db, hub, notifier);
   hub.listeners.metrics = (id, m) => alerts.onMetrics(id, m);
+  hub.listeners.inventory = (id, inv) => alerts.onInventory(id, inv);
   hub.listeners.connected = (id) => alerts.onConnected(id);
   const ctx: Ctx = {
     config,

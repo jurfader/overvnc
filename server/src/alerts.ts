@@ -2,7 +2,7 @@ import type { Db } from './db.ts';
 import type { Hub } from './hub.ts';
 import type { Notifier } from './notify.ts';
 
-export const ALERT_KINDS = ['offline', 'cpu', 'mem', 'disk'] as const;
+export const ALERT_KINDS = ['offline', 'cpu', 'mem', 'disk', 'license'] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 
 export interface AlertRule {
@@ -161,6 +161,29 @@ export class AlertEngine {
     }
   }
 
+  /**
+   * Nowy inwentarz: reguły „license” — wersja ewaluacyjna Windows kończy się za ≤ próg dni.
+   * Wartość alertu = liczba dni; szczegół = data końca i liczba pozostałych przedłużeń.
+   */
+  onInventory(agentId: string, inv: Record<string, any>, now = Date.now()): void {
+    const a = this.agent(agentId);
+    if (!a) return;
+    const lic = inv?.windows?.license as { evaluation?: boolean; graceMinutes?: number; evalEnd?: number; rearmsLeft?: number } | undefined;
+    for (const rule of this.rules) {
+      if (rule.kind !== 'license') continue;
+      const key = `${rule.id}:${agentId}`;
+      const days = lic?.evaluation && typeof lic.graceMinutes === 'number' ? Math.floor(lic.graceMinutes / 1440) : null;
+      if (!this.applies(rule, a) || days === null || days > rule.threshold) {
+        if (this.open.has(key)) this.resolve(key, rule, a, now, days !== null);
+        continue;
+      }
+      if (this.open.has(key)) continue;
+      const end = lic?.evalEnd ? new Date(lic.evalEnd).toLocaleDateString('pl-PL', { timeZone: 'Europe/Warsaw' }) : '';
+      const detail = [end && `do ${end}`, `przedłużeń: ${lic?.rearmsLeft ?? '?'}`].filter(Boolean).join(' · ');
+      this.openAlert(rule, a, days, detail, now);
+    }
+  }
+
   /** Komputer połączył się — zamknij jego alerty „offline”. */
   onConnected(agentId: string, now = Date.now()): void {
     const a = this.agent(agentId);
@@ -233,7 +256,7 @@ export class AlertEngine {
       this.notifier.enqueue({
         title: `${machineName(a)}: ${rule.name}`,
         message: describe(rule, value, detail, startedAt),
-        priority: rule.kind === 'offline' || rule.kind === 'disk' ? 1 : 0,
+        priority: rule.kind === 'offline' || rule.kind === 'disk' || rule.kind === 'license' ? 1 : 0,
         url: this.notifier.machineUrl(a.id),
         urlTitle: 'Otwórz w panelu',
       });
@@ -287,6 +310,8 @@ function describe(rule: AlertRule, value: number | null, detail: string, started
       return `Pamięć zajęta w ${pct(value ?? 0)} (próg ${pct(rule.threshold)})${rule.durationMin ? ` od ${rule.durationMin} min` : ''}.`;
     case 'disk':
       return `Dysk ${detail} zajęty w ${pct(value ?? 0)} (próg ${pct(rule.threshold)}).`;
+    case 'license':
+      return `Wersja próbna Windows kończy się za ${value ?? '?'} dni (${detail}). Przedłużysz ją w panelu: komputer → Windows → Przedłuż okres próbny.`;
   }
 }
 

@@ -148,6 +148,8 @@ export class Hub {
     connected?: (agentId: string) => void;
     /** agent przedstawił się (wersja i możliwości znane) */
     ready?: (agentId: string) => void;
+    /** nowy inwentarz (m.in. licencja Windows) */
+    inventory?: (agentId: string, inv: Record<string, any>) => void;
   } = {};
 
   private notify<K extends keyof Hub['listeners']>(name: K, ...args: Parameters<NonNullable<Hub['listeners'][K]>>): void {
@@ -293,6 +295,7 @@ export class Hub {
         Date.now(),
         agentId,
       );
+    this.notify('inventory', agentId, inv);
   }
 
   /**

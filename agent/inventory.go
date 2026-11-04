@@ -27,6 +27,7 @@ type Inventory struct {
 	Users         []string   `json:"users"`
 	Software      []Software `json:"software"`
 	SoftwareError string     `json:"softwareError,omitempty"`
+	Windows       *WinStatus `json:"windows,omitempty"` // licencja, ochrona przed zapisem, zadania kiosku
 }
 
 type HostInfo struct {
@@ -145,6 +146,8 @@ func collectInventory(ctx context.Context) Inventory {
 	if len(inv.Users) == 0 {
 		inv.Users = consoleUsers()
 	}
+
+	inv.Windows = collectWinStatus(ctx)
 
 	swCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()

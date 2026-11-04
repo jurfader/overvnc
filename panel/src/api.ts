@@ -35,7 +35,7 @@ export interface MetricSample {
 
 export type MetricRange = '1h' | '6h' | '24h' | '7d';
 
-export type AlertKind = 'offline' | 'cpu' | 'mem' | 'disk';
+export type AlertKind = 'offline' | 'cpu' | 'mem' | 'disk' | 'license';
 
 export interface AlertItem {
   id: number;
@@ -128,7 +128,27 @@ export interface Inventory {
   users: string[] | null;
   software: { name: string; version?: string; publisher?: string }[] | null;
   softwareError?: string;
+  /** tylko Windows: licencja, ochrona przed zapisem (UWF), zadania kiosku */
+  windows?: WinStatus | null;
 }
+
+export interface WinStatus {
+  license?: {
+    name: string;
+    description: string;
+    /** 0 brak licencji, 1 licencja, 2–6 okresy przejściowe */
+    status: number;
+    evaluation: boolean;
+    graceMinutes: number;
+    evalEnd?: number;
+    rearmsLeft: number;
+  };
+  uwf?: { installed: boolean; enabled: boolean; nextEnabled: boolean; overlayUsedMB: number; overlayFreeMB: number; agentExcluded: boolean };
+  task?: { kind: string; step: string; started: number };
+  lastTask?: { kind: string; ok: boolean; message: string; at: number };
+}
+
+export type KioskAction = 'service-on' | 'service-off' | 'extend';
 
 export interface AgentDetail extends Agent {
   inventory: Inventory | null;
@@ -439,6 +459,7 @@ export const api = {
   audit: () => request<AuditEntry[]>('GET', '/api/audit?limit=300'),
   // kiosk: zrzut ekranu (miniatury) i komunikat na ekranie
   screenshotUrl: (id: string, w = 640) => `/api/agents/${id}/screenshot?w=${w}`,
+  kioskAction: (id: string, action: KioskAction) => request<{ status: string; restarts?: number }>('POST', `/api/agents/${id}/kiosk/${action}`, {}),
   screenMessage: (id: string, body: { text: string; title?: string; seconds?: number }) => request<Ok>('POST', `/api/agents/${id}/message`, body),
 
   // alerty i powiadomienia
