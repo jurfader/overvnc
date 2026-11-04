@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FakeAgent, setup, until } from './helpers.ts';
 import { newerVersion, UpdateStore } from '../updates.ts';
+import { RECONNECT_UPDATE_DELAY } from '../routes/updates.ts';
 import { openDb } from '../db.ts';
 
 const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../scripts/release-manifest.mjs');
@@ -168,4 +169,32 @@ test('trasy: tryb ręczny — brak oferty do zatwierdzenia wersji', async (t) =>
   assert.equal(ok.statusCode, 200);
   assert.equal((await s.app.inject({ url: '/api/agent/update?version=0.5.0&platform=linux-amd64', headers: auth })).json().version, '0.6.0');
   assert.ok(s.db.prepare("SELECT 1 FROM audit_log WHERE action = 'update.approve'").get());
+});
+
+test('aktualizacja po połączeniu: nieaktualny komputer, który był offline przy wydaniu, dostaje ją sam', async (t) => {
+  const saved = { ...RECONNECT_UPDATE_DELAY };
+  RECONNECT_UPDATE_DELAY.minMs = 0;
+  RECONNECT_UPDATE_DELAY.spreadMs = 0;
+  t.after(() => Object.assign(RECONNECT_UPDATE_DELAY, saved));
+  const k = keypair();
+  const s = await setup({ releasePublicKey: k.pub });
+  t.after(s.close);
+  const c = await s.login();
+  // wydanie pojawia się, zanim komputery się połączą (np. restart serwera, kiosk jeszcze offline)
+  await s.ctx.updates.importDir(makeRelease('0.10.0', k.pem));
+  const port = await s.listen();
+  const connect = async (ver: string) => {
+    const cred = await s.enroll(c, `pc-${ver}`);
+    const a = new FakeAgent(port, cred.agentId, cred.agentSecret);
+    a.handlers['update.check'] = () => ({ status: 'restarting', version: '0.10.0' });
+    await a.open();
+    a.send({ type: 'hello', data: { version: ver, protocol: 1, capabilities: ['update.check'] } });
+    return a;
+  };
+  const stary = await connect('0.7.0'); // 0.7.0 < 0.10.0 — porównanie liczbowe, nie tekstowe
+  const aktualny = await connect('0.10.0');
+  t.after(() => (stary.close(), aktualny.close()));
+  await stary.waitFor((m) => m.type === 'update.check', 3000);
+  await new Promise((r) => setTimeout(r, 200));
+  assert.ok(!aktualny.received.some((m) => m.type === 'update.check'), 'aktualny komputer nie dostaje polecenia');
 });

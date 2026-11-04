@@ -143,7 +143,12 @@ export class Hub {
   private pingTimer: NodeJS.Timeout;
   private closed = false;
   /** Słuchacze zdarzeń agentów (np. silnik alertów); błąd słuchacza nie przerywa obsługi agenta. */
-  listeners: { metrics?: (agentId: string, data: Record<string, unknown>) => void; connected?: (agentId: string) => void } = {};
+  listeners: {
+    metrics?: (agentId: string, data: Record<string, unknown>) => void;
+    connected?: (agentId: string) => void;
+    /** agent przedstawił się (wersja i możliwości znane) */
+    ready?: (agentId: string) => void;
+  } = {};
 
   private notify<K extends keyof Hub['listeners']>(name: K, ...args: Parameters<NonNullable<Hub['listeners'][K]>>): void {
     try {
@@ -229,6 +234,7 @@ export class Hub {
         this.db.prepare('UPDATE agents SET agent_version = ?, last_seen = ? WHERE id = ?').run(str(d.version), now, agentId);
         if (d.inventory) this.storeInventory(agentId, d.inventory);
         this.broadcastAgent(agentId, { type: 'agent_updated', id: agentId, data: this.summary(agentId) });
+        this.notify('ready', agentId);
         break;
       }
       case 'inventory': {

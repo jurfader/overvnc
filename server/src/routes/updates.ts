@@ -16,6 +16,8 @@ const IdParams = z.object({ id: z.uuid() });
 
 /** Odstęp między komputerami przy wdrażaniu — flota nie pobiera binarki w tej samej sekundzie. */
 export const ROLLOUT_STAGGER_MS = 2000;
+/** Opóźnienie aktualizacji po połączeniu nieaktualnego agenta (losowe — po awarii serwera nie wszystkie naraz). */
+export const RECONNECT_UPDATE_DELAY = { minMs: 20_000, spreadMs: 40_000 };
 
 export async function updateRoutes(app: FastifyInstance, ctx: Ctx) {
   const { db, hub, updates } = ctx;
@@ -61,6 +63,27 @@ export async function updateRoutes(app: FastifyInstance, ctx: Ctx) {
     return due.length;
   };
   ctx.rollout = rollout;
+
+  // Komputer, który był offline w chwili wydania (albo wrócił po restarcie serwera), dostaje aktualizację
+  // po połączeniu — inaczej czekałby do własnego sprawdzenia agenta (co kilka godzin).
+  const pending = new Set<NodeJS.Timeout>();
+  hub.listeners.ready = (id) => {
+    const delay = RECONNECT_UPDATE_DELAY.minMs + Math.random() * RECONNECT_UPDATE_DELAY.spreadMs;
+    const t = setTimeout(() => {
+      pending.delete(t);
+      try {
+        rollout([id]);
+      } catch (err) {
+        app.log.warn(`aktualizacja po połączeniu: ${(err as Error).message}`);
+      }
+    }, delay);
+    t.unref();
+    pending.add(t);
+  };
+  app.addHook('onClose', async () => {
+    for (const t of pending) clearTimeout(t);
+    pending.clear();
+  });
 
   app.get('/api/updates', manage, async (req) => {
     requireGlobal(req);
