@@ -36,7 +36,7 @@ func runDesktopSnapshot(maxW int) int {
 		_ = writeMsg(out, msgLog, []byte(msg))
 		return 1
 	}
-	be, err := newDesktopBackend()
+	be, err := newDesktopBackend(false)
 	if err != nil {
 		return fail("ekran niedostępny: " + err.Error())
 	}

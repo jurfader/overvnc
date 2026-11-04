@@ -22,7 +22,13 @@ const Event = z.discriminatedUnion('t', [
   z.object({ t: z.literal('b'), x: z.number().min(0).max(1), y: z.number().min(0).max(1), b: z.number().int().min(0).max(2), d: z.boolean() }),
   z.object({ t: z.literal('w'), dy: z.number().int().min(-2400).max(2400) }),
   z.object({ t: z.literal('k'), code: z.string().regex(/^[A-Za-z0-9]{1,24}$/), d: z.boolean() }),
-  z.object({ t: z.literal('cfg'), quality: z.enum(['low', 'medium', 'high']).optional(), monitor: z.number().int().min(0).max(31).optional() }),
+  z.object({
+    t: z.literal('cfg'),
+    quality: z.enum(['low', 'medium', 'high']).optional(),
+    monitor: z.number().int().min(0).max(31).optional(),
+    // kursor w obrazie: false — przeglądarka pokazuje własny (natychmiastowa reakcja na ruch myszy)
+    cursor: z.boolean().optional(),
+  }),
   z.object({ t: z.literal('kf') }),
 ]);
 const INPUT_TYPES = new Set(['m', 'b', 'w', 'k']);

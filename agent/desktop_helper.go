@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -18,12 +19,18 @@ type desktopBackend interface {
 	capture(m MonitorInfo) (bgra []byte, w, h int, err error)
 	input(ev InputEvent, m MonitorInfo) error
 	close()
+	// setCursor: czy dorysowywać kursor do obrazu (wyłączony, gdy przeglądarka rysuje własny)
+	setCursor(on bool)
+	// interval: minimalny odstęp między klatkami dla tej metody przechwytywania
+	interval() time.Duration
 }
 
+// errNoChange — obraz się nie zmienił; nie ma czego wysyłać (DXGI wie to bez kopiowania ekranu).
+var errNoChange = errors.New("bez zmian")
+
 const (
-	helperFrameInterval = 66 * time.Millisecond // maks. ~15 kl./s
-	helperMaxCredits    = 3                     // najwyżej 3 klatki „w drodze” (przy opóźnieniu łącza przez Cloudflare 2 to za mało)
-	helperInfoInterval  = 2 * time.Second
+	helperMaxCredits   = 3 // najwyżej 3 klatki „w drodze” (przy opóźnieniu łącza przez Cloudflare 2 to za mało)
+	helperInfoInterval = 2 * time.Second
 )
 
 type helperOut struct {
@@ -59,7 +66,7 @@ func runDesktopHelper() int {
 	runtime.LockOSThread()
 	out := &helperOut{w: bufio.NewWriterSize(os.Stdout, 256<<10)}
 	helperLogHook = func(s string) { out.log("%s", s) }
-	be, err := newDesktopBackend()
+	be, err := newDesktopBackend(true)
 	if err != nil {
 		out.log("pulpit niedostępny: %v", err)
 		return 1
@@ -127,8 +134,9 @@ func runDesktopHelper() int {
 
 	for {
 		wait := helperInfoInterval
+		frameInterval := be.interval()
 		if credits > 0 {
-			wait = max(time.Millisecond, helperFrameInterval-time.Since(last))
+			wait = max(time.Millisecond, frameInterval-time.Since(last))
 		}
 		select {
 		case m, ok := <-msgs:
@@ -155,6 +163,9 @@ func runDesktopHelper() int {
 						current = *ev.Monitor
 						refreshInfo(true)
 					}
+					if ev.Cursor != nil {
+						be.setCursor(*ev.Cursor)
+					}
 				case "kf":
 					enc.reset()
 				default:
@@ -169,10 +180,13 @@ func runDesktopHelper() int {
 		case <-time.After(wait):
 		}
 
-		if credits > 0 && time.Since(last) >= helperFrameInterval {
+		if credits > 0 && time.Since(last) >= frameInterval {
 			last = time.Now()
 			mon := monitor()
 			bgra, w, h, err := be.capture(mon)
+			if errors.Is(err, errNoChange) {
+				continue
+			}
 			if err != nil {
 				if time.Since(lastErr) > 5*time.Second {
 					lastErr = time.Now()

@@ -164,3 +164,20 @@ func TestDownscaleBGRA(t *testing.T) {
 		t.Errorf("średnia czerwieni = %d, oczekiwano 150", m.Pix[0])
 	}
 }
+
+func TestHelperCrashed(t *testing.T) {
+	for _, c := range []struct {
+		code int
+		want bool
+	}{
+		{0, false},              // zwykłe zakończenie
+		{1, false},              // błąd obsłużony / zakończony przez nas (TerminateProcess)
+		{2, true},               // panika Go
+		{int(0xC0000005), true}, // naruszenie dostępu (np. sterownik karty graficznej)
+		{-1, false},             // zabity sygnałem (Linux/macOS)
+	} {
+		if got := helperCrashed(c.code); got != c.want {
+			t.Errorf("helperCrashed(%#x) = %v, oczekiwano %v", uint32(c.code), got, c.want)
+		}
+	}
+}

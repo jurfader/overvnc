@@ -9,6 +9,7 @@ import (
 	"os"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -107,9 +108,12 @@ type winHelper struct {
 
 func (h *winHelper) stdin() io.Writer  { return h.in }
 func (h *winHelper) stdout() io.Reader { return h.out }
-func (h *winHelper) wait() {
+func (h *winHelper) wait() int {
 	_, _ = windows.WaitForSingleObject(h.proc, windows.INFINITE)
+	var code uint32
+	_ = windows.GetExitCodeProcess(h.proc, &code)
 	h.once.Do(func() { _ = windows.CloseHandle(h.proc) })
+	return int(code)
 }
 func (h *winHelper) kill() {
 	_ = h.in.Close()
@@ -319,7 +323,12 @@ type gdiBackend struct {
 	bits     unsafe.Pointer
 	w, h     int
 	out      []byte // bufor klatki używany ponownie (bez 8 MB nowej pamięci na każdą klatkę)
+	// kursor dorysowany do obrazu; wyłączony, gdy przeglądarka pokazuje własny (natychmiastowa reakcja)
+	drawCursorOn bool
 }
+
+func (b *gdiBackend) setCursor(on bool)       { b.drawCursorOn = on }
+func (b *gdiBackend) interval() time.Duration { return gdiFrameInterval }
 
 var (
 	monitorsMu  sync.Mutex
@@ -342,7 +351,8 @@ var (
 	})
 )
 
-func newDesktopBackend() (desktopBackend, error) {
+// newDesktopBackend: live=true — sesja pulpitu (DXGI z zapasowym GDI), false — pojedynczy zrzut (GDI).
+func newDesktopBackend(live bool) (desktopBackend, error) {
 	// fizyczne piksele na ekranach z powiększeniem (125%, 150%…) — inaczej obraz i kliknięcia się rozjadą
 	// SetProcessDpiAwarenessContext istnieje od Windows 10 1703 — wywołanie brakującej funkcji kończy się paniką
 	perMonitor := false
@@ -353,9 +363,17 @@ func newDesktopBackend() (desktopBackend, error) {
 	if !perMonitor && procSetProcessDPIAware.Find() == nil {
 		_, _, _ = procSetProcessDPIAware.Call()
 	}
-	b := &gdiBackend{}
+	b := &gdiBackend{drawCursorOn: true}
 	b.switchDesktop()
-	return b, nil
+	if !live || os.Getenv("OVERVNC_CAPTURE") == "gdi" {
+		return b, nil
+	}
+	d, err := newDXGIBackend(b)
+	if err != nil {
+		helperLogHook(fmt.Sprintf("przechwytywanie ekranu: DXGI niedostępne (%v) — GDI", err))
+		return b, nil
+	}
+	return d, nil
 }
 
 // switchDesktop przełącza wątek na bieżący pulpit wejściowy (zwykły / ekran blokady / UAC).
@@ -380,6 +398,19 @@ func (b *gdiBackend) switchDesktop() {
 		_, _, _ = procCloseDesktop.Call(b.desk)
 	}
 	b.desk, b.deskName = h, n
+}
+
+// inputDesktopName — nazwa bieżącego pulpitu wejściowego („Default”, „Winlogon” przy blokadzie i UAC).
+func inputDesktopName() string {
+	h, _, _ := procOpenInputDesktop.Call(0, 0, windows.GENERIC_READ)
+	if h == 0 {
+		return ""
+	}
+	defer procCloseDesktop.Call(h)
+	var name [64]uint16
+	var needed uint32
+	_, _, _ = procGetUserObjectInfoW.Call(h, 2 /* UOI_NAME */, uintptr(unsafe.Pointer(&name[0])), uintptr(len(name)*2), uintptr(unsafe.Pointer(&needed)))
+	return windows.UTF16ToString(name[:])
 }
 
 func (b *gdiBackend) monitors() ([]MonitorInfo, string) {
@@ -447,7 +478,9 @@ func (b *gdiBackend) capture(m MonitorInfo) ([]byte, int, int, error) {
 	if r == 0 {
 		return nil, 0, 0, fmt.Errorf("BitBlt: %v", err)
 	}
-	b.drawCursor(m)
+	if b.drawCursorOn {
+		b.drawCursor(m)
+	}
 	n := m.W * m.H * 4
 	if len(b.out) != n {
 		b.out = make([]byte, n)

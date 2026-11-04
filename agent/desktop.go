@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -13,9 +14,16 @@ import (
 type helperProc interface {
 	stdin() io.Writer
 	stdout() io.Reader
-	wait()
+	wait() int // kod wyjścia procesu
 	kill()
 }
+
+// captureGDIOnly — pomocnik pulpitu padł w trybie DXGI (np. błąd sterownika karty graficznej):
+// kolejne sesje przechwytują ekran przez GDI, aż do restartu agenta.
+var captureGDIOnly atomic.Bool
+
+// helperCrashed: panika Go (2) albo wyjątek Windows (kody NTSTATUS 0xC0000000+, np. naruszenie dostępu).
+func helperCrashed(code int) bool { return code == 2 || (code > 0 && uint32(code) >= 0xC0000000) }
 
 type desktopOpenReq struct {
 	Channel  uint32 `json:"channel"`
@@ -28,9 +36,10 @@ type desktopOpenReq struct {
 
 // desktopSession — kanał pulpitu: wejście od serwera -> pomocnik, klatki pomocnika -> serwer.
 type desktopSession struct {
-	proc helperProc
-	mu   sync.Mutex
-	once sync.Once
+	proc    helperProc
+	mu      sync.Mutex
+	once    sync.Once
+	closing atomic.Bool // zamknięcie zlecone przez nas (kod wyjścia pomocnika nie świadczy o awarii)
 }
 
 func (d *desktopSession) toHelper(typ byte, p []byte) error {
@@ -47,6 +56,7 @@ func (d *desktopSession) ack(int) { _ = d.toHelper(msgNext, nil) }
 
 func (d *desktopSession) close() {
 	d.once.Do(func() {
+		d.closing.Store(true)
 		_ = d.toHelper(msgQuit, nil)
 		go func() {
 			time.Sleep(2 * time.Second)
@@ -69,7 +79,11 @@ func handleDesktopOpen(ctx context.Context, data json.RawMessage) (any, error) {
 	} else if !ok {
 		return nil, protoErr("consent_denied", "użytkownik komputera nie zgodził się na połączenie")
 	}
-	proc, err := spawnDesktopHelper()
+	var args []string
+	if captureGDIOnly.Load() {
+		args = append(args, "gdi")
+	}
+	proc, err := spawnDesktopHelper(args...)
 	if err != nil {
 		return nil, protoErr("helper", "nie można uruchomić przechwytywania ekranu: %v", err)
 	}
@@ -107,7 +121,9 @@ func handleDesktopOpen(ctx context.Context, data json.RawMessage) (any, error) {
 				break
 			}
 		}
-		proc.wait()
+		if code := proc.wait(); helperCrashed(code) && !d.closing.Load() && !captureGDIOnly.Swap(true) {
+			logger.Warningf("pulpit %d: pomocnik zakończył się awarią (kod %#x) — kolejne sesje przez GDI", req.Channel, uint32(code))
+		}
 		if sess.channels.remove(req.Channel) != nil {
 			ev := map[string]any{"channel": req.Channel, "exitCode": 0}
 			if reason != "" && reason != "connection" {

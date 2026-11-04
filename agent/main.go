@@ -110,6 +110,9 @@ func main() {
 			maxW, _ := strconv.Atoi(fs.Arg(1))
 			os.Exit(runDesktopSnapshot(maxW))
 		}
+		if fs.Arg(0) == "gdi" {
+			_ = os.Setenv("OVERVNC_CAPTURE", "gdi") // po awarii DXGI w tej instancji agenta
+		}
 		os.Exit(runDesktopHelper())
 
 	case "enroll":

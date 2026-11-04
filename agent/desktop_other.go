@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"time"
 )
 
 // Na macOS/Linuksie pulpit zdalny jeszcze nie przechwytuje prawdziwego ekranu — dostępny jest
@@ -23,7 +24,13 @@ type execHelper struct {
 
 func (h *execHelper) stdin() io.Writer  { return h.in }
 func (h *execHelper) stdout() io.Reader { return h.out }
-func (h *execHelper) wait()             { _ = h.cmd.Wait() }
+func (h *execHelper) wait() int {
+	_ = h.cmd.Wait()
+	if h.cmd.ProcessState == nil {
+		return -1
+	}
+	return h.cmd.ProcessState.ExitCode()
+}
 func (h *execHelper) kill() {
 	_ = h.in.Close()
 	if h.cmd.Process != nil {
@@ -61,7 +68,7 @@ type syntheticBackend struct {
 	color  byte
 }
 
-func newDesktopBackend() (desktopBackend, error) {
+func newDesktopBackend(_ bool) (desktopBackend, error) {
 	if !desktopSupported() {
 		return nil, fmt.Errorf("pulpit zdalny na tym systemie nie jest jeszcze obsługiwany")
 	}
@@ -116,6 +123,9 @@ func (s *syntheticBackend) input(ev InputEvent, m MonitorInfo) error {
 }
 
 func (s *syntheticBackend) close() {}
+
+func (s *syntheticBackend) setCursor(bool)          {}
+func (s *syntheticBackend) interval() time.Duration { return 66 * time.Millisecond }
 
 // showScreenMessage — tryb testowy: komunikat trafia do logu agenta (testy e2e sprawdzają, że dotarł).
 func showScreenMessage(title, text string, seconds int) error {

@@ -125,7 +125,13 @@ export function DesktopView({ agent }: { agent: Agent }) {
       if (typeof ev.data === 'string') {
         const m = JSON.parse(ev.data) as { type: string; consent?: string; message?: string };
         if (m.type === 'connecting' && m.consent === 'ask') setState('consent');
-        if (m.type === 'ready') setState('ready');
+        if (m.type === 'ready') {
+          setState('ready');
+          // sterowanie myszą: kursor rysuje przeglądarka (bez opóźnienia łącza), agent go nie dorysowuje;
+          // podgląd i ekrany dotykowe: kursor z komputera — widać, co robi jego użytkownik
+          const localCursor = !viewOnly && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+          ws.send(JSON.stringify({ t: 'cfg', cursor: !localCursor }));
+        }
         if (m.type === 'closed') setMessage(m.message ?? '');
         return;
       }

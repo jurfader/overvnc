@@ -3,15 +3,16 @@ module overvnc/agent
 go 1.27.3
 
 require (
+	github.com/aymanbagabas/go-pty v0.2.3
 	github.com/coder/websocket v1.8.15
 	github.com/kardianos/service v1.3.0
+	github.com/kirides/go-d3d v1.0.1
 	github.com/shirou/gopsutil/v4 v4.26.10
 	golang.org/x/sys v0.49.0
 	howett.net/plist v1.0.1
 )
 
 require (
-	github.com/aymanbagabas/go-pty v0.2.3 // indirect
 	github.com/creack/pty v1.1.24 // indirect
 	github.com/ebitengine/purego v0.11.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
