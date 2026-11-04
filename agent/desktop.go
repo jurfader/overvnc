@@ -83,6 +83,10 @@ func handleDesktopOpen(ctx context.Context, data json.RawMessage) (any, error) {
 	if captureGDIOnly.Load() {
 		args = append(args, "gdi")
 	}
+	// użytkownik ma wiedzieć, że ktoś jest połączony — przez całą sesję, nie tylko jednym komunikatem
+	if req.Consent == "notify" || req.Consent == "ask" {
+		args = append(args, "overlay="+cleanOverlayName(req.Viewer))
+	}
 	proc, err := spawnDesktopHelper(args...)
 	if err != nil {
 		return nil, protoErr("helper", "nie można uruchomić przechwytywania ekranu: %v", err)

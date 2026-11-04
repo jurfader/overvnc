@@ -86,7 +86,7 @@ func askDesktopConsent(mode, viewer string) (bool, error) {
 	}
 	switch mode {
 	case "notify":
-		_, _ = wtsSendMessage(sid, "OVERVNC", who+" łączy się zdalnie z tym komputerem (OVERVNC).", mbOK|mbIconInfo|mbSetForeground, 10, false)
+		// bez okna do zamknięcia: przez całą sesję widać ramkę „Aktywne Wsparcie Techniczne” (overlay_windows.go)
 		return true, nil
 	case "ask":
 		resp, err := wtsSendMessage(sid, "OVERVNC — prośba o połączenie",

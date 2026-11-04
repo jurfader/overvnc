@@ -114,8 +114,13 @@ func main() {
 			maxW, _ := strconv.Atoi(fs.Arg(1))
 			os.Exit(runDesktopSnapshot(maxW))
 		}
-		if fs.Arg(0) == "gdi" {
-			_ = os.Setenv("OVERVNC_CAPTURE", "gdi") // po awarii DXGI w tej instancji agenta
+		for _, a := range fs.Args() {
+			switch {
+			case a == "gdi":
+				_ = os.Setenv("OVERVNC_CAPTURE", "gdi") // po awarii DXGI w tej instancji agenta
+			case strings.HasPrefix(a, "overlay="):
+				helperOverlay, helperOverlayName = true, strings.TrimPrefix(a, "overlay=")
+			}
 		}
 		os.Exit(runDesktopHelper())
 

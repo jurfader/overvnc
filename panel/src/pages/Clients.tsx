@@ -8,8 +8,8 @@ import { plural } from '../format.ts';
 type TabKey = 'clients' | 'tags';
 
 const CONSENT_OPTIONS: { value: ConsentMode; label: string; hint: string }[] = [
-  { value: 'notify', label: 'Z powiadomieniem', hint: 'Połączenie od razu, użytkownik widzi na ekranie informację, kto się łączy.' },
-  { value: 'ask', label: 'Z pytaniem o zgodę', hint: 'Użytkownik musi kliknąć „Tak” (30 s). Dla komputerów biurowych.' },
+  { value: 'notify', label: 'Z powiadomieniem', hint: 'Połączenie od razu. Przez całą sesję ekran ma ramkę „Aktywne Wsparcie Techniczne” z nazwą osoby, która się połączyła.' },
+  { value: 'ask', label: 'Z pytaniem o zgodę', hint: 'Użytkownik musi kliknąć „Tak” (30 s), potem widzi ramkę wsparcia. Dla komputerów biurowych.' },
   { value: 'none', label: 'Bez komunikatu', hint: 'Dla kiosków i komputerów bez obsługi — nic nie wyskakuje na ekranie.' },
 ];
 

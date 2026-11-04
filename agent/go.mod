@@ -8,6 +8,7 @@ require (
 	github.com/kardianos/service v1.3.0
 	github.com/kirides/go-d3d v1.0.1
 	github.com/shirou/gopsutil/v4 v4.26.10
+	golang.org/x/image v0.47.0
 	golang.org/x/sys v0.49.0
 	howett.net/plist v1.0.1
 )
@@ -23,4 +24,5 @@ require (
 	github.com/u-root/u-root v0.16.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	golang.org/x/crypto v0.51.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 )
