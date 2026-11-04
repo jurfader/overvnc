@@ -19,6 +19,8 @@ interface DesktopInfo {
   monitors: MonitorInfo[];
   current: number;
   desktop?: string;
+  /** macOS: brakująca zgoda systemu — "screen" (nagrywanie ekranu), "input" (Dostępność) */
+  notice?: string;
 }
 
 const QUALITY_LABELS: Record<Quality, string> = { low: 'Niska (szybka)', medium: 'Średnia', high: 'Wysoka' };
@@ -289,7 +291,7 @@ export function DesktopView({ agent }: { agent: Agent }) {
     const onKey = (d: boolean) => (e: KeyboardEvent) => {
       // Ctrl+V / Cmd+V: przeglądarka odda tekst ze schowka (zdarzenie paste) — wkleimy go przez schowek komputera
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV' && !viewOnlyRef.current) {
-        // Cmd na Macu trafia do komputera jako klawisz Windows — zwolnij go, inaczej wyszłoby Win+Ctrl+V
+        // Cmd trafia do komputera jako Win (Windows) / Cmd (macOS) — zwolnij go; wklejenie robi agent przez schowek
         for (const code of ['MetaLeft', 'MetaRight']) {
           if (pressedKeys.current.delete(code)) send({ t: 'k', code, d: false });
         }
@@ -529,7 +531,11 @@ export function DesktopView({ agent }: { agent: Agent }) {
       <EmptyState
         icon={MonitorSmartphone}
         title="Pulpit zdalny niedostępny"
-        text={agent.os === 'windows' ? 'Ta wersja agenta nie ma jeszcze pulpitu zdalnego — zaktualizuj agenta (System → Aktualizacje).' : 'Pulpit zdalny jest na razie dostępny dla Windows. macOS i Linux — w kolejnych wersjach.'}
+        text={
+          agent.os === 'linux'
+            ? 'Pulpit zdalny jest dostępny dla Windows i macOS. Na Linuksie użyj Terminala i Plików.'
+            : 'Ta wersja agenta nie ma jeszcze pulpitu zdalnego dla tego systemu — zaktualizuj agenta (System → Aktualizacje).'
+        }
       />
     );
 
@@ -606,6 +612,7 @@ export function DesktopView({ agent }: { agent: Agent }) {
           <Button size="sm" variant="ghost" icon={fullscreen || cssFull ? Minimize2 : Maximize2} title={fullscreen || cssFull ? 'Zamknij pełny ekran' : 'Pełny ekran'} onClick={toggleFullscreen} />
         </div>
       </div>
+      {info?.notice && <MacPermissionNotice notice={info.notice} onRetry={() => setSession((n) => n + 1)} />}
       <div className="desktop-stage" ref={stage}>
         <div className="desktop-zoom" style={zoom.s > 1 ? { transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.s})` } : undefined}>
           <canvas ref={canvas} className={`desktop-canvas ${viewOnly ? 'view-only' : ''}`} tabIndex={0} width={1280} height={720} aria-label="Ekran zdalnego komputera" />
@@ -700,7 +707,7 @@ export function DesktopView({ agent }: { agent: Agent }) {
               onPointerDown={(e) => e.preventDefault()}
               onClick={() => setMods((cur) => ({ ...cur, [m.key]: !cur[m.key] }))}
             >
-              {m.label}
+              {m.key === 'meta' && agent.os === 'darwin' ? 'Cmd' : m.key === 'alt' && agent.os === 'darwin' ? 'Opt' : m.label}
             </button>
           ))}
           {DESK_KEYS.map((k) => (
@@ -721,6 +728,27 @@ export function DesktopView({ agent }: { agent: Agent }) {
         <span className="mouse-only">Kliknij obraz, aby sterować klawiaturą (skróty klawiszowe trafiają do zdalnego komputera, Ctrl+V wkleja tekst z Twojego schowka). </span>
         <span className="touch-only">Dotknij — klik · przytrzymaj — prawy klik · przeciągnij — przeciąganie · dwa palce — przewijanie · rozsuń palce — powiększenie. </span>
         Sesja jest zapisywana w dzienniku zdarzeń.
+      </div>
+    </div>
+  );
+}
+
+/** macOS wymaga zgód dla agenta — instrukcja dla osoby przy Macu (albo dla Ciebie, jeśli masz do niego dostęp). */
+function MacPermissionNotice({ notice, onRetry }: { notice: string; onRetry: () => void }) {
+  const screen = notice.includes('screen');
+  const input = notice.includes('input');
+  const panes = [screen && '„Nagrywanie ekranu i dźwięku systemowego”', input && '„Dostępność”'].filter(Boolean).join(' oraz ');
+  return (
+    <div className="callout callout-warning desktop-notice">
+      <ShieldAlert />
+      <div>
+        <strong>{screen && input ? 'Mac nie pozwala jeszcze na podgląd ekranu ani sterowanie' : screen ? 'Mac nie pozwala jeszcze na podgląd ekranu — widać tylko tapetę' : 'Mac nie pozwala jeszcze na sterowanie myszą i klawiaturą'}</strong>
+        <div className="small">
+          Na tym Macu: Ustawienia systemowe → Prywatność i ochrona → {panes} → przycisk <strong>+</strong> → Cmd+Shift+G → wpisz <code>/usr/local/bin/overvnc-agent</code> → Otwórz → włącz przełącznik. Zgodę daje się raz.{' '}
+          <button className="link-btn notice-retry" onClick={onRetry}>
+            Połącz ponownie
+          </button>
+        </div>
       </div>
     </div>
   );

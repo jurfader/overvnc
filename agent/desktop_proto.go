@@ -79,6 +79,9 @@ type DesktopInfo struct {
 	Monitors []MonitorInfo `json:"monitors"`
 	Current  int           `json:"current"`
 	Desktop  string        `json:"desktop,omitempty"` // np. "Default" albo "Winlogon" (ekran blokady/UAC)
+	// Notice — problem do pokazania w panelu: "screen" (macOS: brak zgody na nagrywanie ekranu),
+	// "input" (macOS: brak zgody „Dostępność” — sterowanie nie działa), "screen,input"
+	Notice string `json:"notice,omitempty"`
 }
 
 // InputEvent — zdarzenie z przeglądarki. Współrzędne X/Y w zakresie 0..1 względem bieżącego monitora.

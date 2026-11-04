@@ -939,3 +939,7 @@ textarea.pole.editor-area { font: 12.5px/1.55 var(--font-mono); height: 58vh; mi
 .upload-row .jp-track { grid-column: 1; }
 .upload-row .btn { grid-column: 2; grid-row: 1 / span 2; }
 .inline-form select.pole { flex: 1; min-width: 180px; }
+.desktop-notice { margin: 8px 10px 0; }
+.desktop-notice .small { color: rgb(var(--ink-2)); margin-top: 2px; }
+.notice-retry { display: inline !important; color: rgb(var(--primary)) !important; font-weight: 600; }
+.desktop-notice code { overflow-wrap: anywhere; }

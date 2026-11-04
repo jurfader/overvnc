@@ -27,6 +27,12 @@ type desktopBackend interface {
 	setClipboard(text string) error
 }
 
+// pasteModifier — klawisz wklejania razem z V (Windows: Ctrl, macOS: Cmd).
+var pasteModifier = "ControlLeft"
+
+// noticer — backend zgłasza problem do pokazania w panelu (np. brak zgody macOS na sterowanie).
+type noticer interface{ notice() string }
+
 // errNoChange — obraz się nie zmienił; nie ma czego wysyłać (DXGI wie to bez kopiowania ekranu).
 var errNoChange = errors.New("bez zmian")
 
@@ -123,6 +129,9 @@ func runDesktopHelper() int {
 			enc.reset() // inny pulpit (np. ekran blokady) — pełna klatka
 		}
 		info := DesktopInfo{Monitors: mons, Current: monitor().Index, Desktop: desk}
+		if n, ok := be.(noticer); ok {
+			info.Notice = n.notice()
+		}
 		b, _ := json.Marshal(info)
 		if force || string(b) != lastInfo {
 			lastInfo = string(b)
@@ -176,7 +185,7 @@ func runDesktopHelper() int {
 						out.log("schowek: %v", err)
 						continue
 					}
-					for _, k := range []InputEvent{{T: "k", Code: "ControlLeft", D: true}, {T: "k", Code: "KeyV", D: true}, {T: "k", Code: "KeyV"}, {T: "k", Code: "ControlLeft"}} {
+					for _, k := range []InputEvent{{T: "k", Code: pasteModifier, D: true}, {T: "k", Code: "KeyV", D: true}, {T: "k", Code: "KeyV"}, {T: "k", Code: pasteModifier}} {
 						_ = be.input(k, monitor())
 					}
 				default:
