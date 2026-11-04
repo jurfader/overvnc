@@ -3,7 +3,7 @@
 # Użycie: scripts/build-agents.sh [wersja]
 set -euo pipefail
 cd "$(dirname "$0")/../agent"
-VERSION="${1:-$(date +%Y.%m.%d)-$(git rev-parse --short HEAD 2>/dev/null || echo dev)}"
+VERSION="${1:-0.0.0-$(git rev-parse --short HEAD 2>/dev/null || echo dev)}"
 OUT=../dist/agents
 mkdir -p "$OUT"
 for target in windows/amd64 windows/arm64 darwin/amd64 darwin/arm64 linux/amd64 linux/arm64; do

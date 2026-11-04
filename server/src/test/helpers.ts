@@ -1,4 +1,7 @@
 import type { AddressInfo } from 'node:net';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { WebSocket } from 'ws';
 import { buildApp } from '../app.ts';
 import { loadConfig, type Config } from '../config.ts';
@@ -10,7 +13,17 @@ export const ADMIN = { username: 'admin', password: 'test-password-123' };
 /** Świeża aplikacja z bazą w pamięci i kontem administratora. */
 export async function setup(overrides: Partial<Config> = {}) {
   const db = openDb(':memory:');
-  const config: Config = { ...loadConfig({}), dbFile: ':memory:', panelDir: null, logLevel: 'silent', keyFile: null, requireMfa: false, ...overrides };
+  const config: Config = {
+    ...loadConfig({}),
+    dbFile: ':memory:',
+    panelDir: null,
+    logLevel: 'silent',
+    keyFile: null,
+    requireMfa: false,
+    updatesDir: mkdtempSync(path.join(tmpdir(), 'overvnc-updates-')),
+    github: null,
+    ...overrides,
+  };
   await ensureAdmin(db, { ADMIN_USER: ADMIN.username, ADMIN_PASSWORD: ADMIN.password });
   const { app, ctx } = await buildApp(config, db);
   await app.ready();

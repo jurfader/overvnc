@@ -77,6 +77,8 @@ export async function terminalRoutes(app: FastifyInstance, ctx: Ctx) {
         idleTimer = setTimeout(() => end(TERM_CLOSE.idle, 'Sesja zamknięta po 30 minutach bezczynności.'), IDLE_MS);
       };
       touch();
+      // Cloudflare Tunnel zamyka bezczynne WebSockety po ~100 s — ping utrzymuje sesję, gdy nikt nie pisze
+      const keepAlive = setInterval(() => socket.readyState === socket.OPEN && socket.ping(), 30_000);
 
       hub
         .openChannel<{ shell: string; pid: number }>(id, 'term.open', { cols: q.cols, rows: q.rows, shell: q.shell ?? '' }, {
@@ -126,6 +128,7 @@ export async function terminalRoutes(app: FastifyInstance, ctx: Ctx) {
         sessions.delete(finish);
         ended = true;
         clearTimeout(idleTimer);
+        clearInterval(keepAlive);
         if (channel !== null) hub.closeChannel(id, channel);
         audit(db, actor, 'term.close', id, { seconds: Math.round((Date.now() - started) / 1000), bytesIn, bytesOut, reason }, req.ip);
         if (reason && socket.readyState === socket.OPEN) socket.close(1001, 'Serwer jest restartowany.');

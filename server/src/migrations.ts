@@ -136,4 +136,13 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE sessions ADD COLUMN user_agent TEXT;
   CREATE INDEX sessions_user ON sessions(user_id);
   `,
+
+  // 3 — ustawienia serwera (polityka aktualizacji agentów itp.) (v0.6.0)
+  `
+  CREATE TABLE settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  `,
 ];

@@ -1,0 +1,56 @@
+name: Release
+
+# Wydanie agenta: git tag vX.Y.Z && git push origin vX.Y.Z
+# Buduje agenta na 6 platform, podpisuje manifest kluczem z sekretu OVERVNC_SIGNING_KEY
+# i publikuje GitHub Release. Serwery OVERVNC pobierają je same (GITHUB_REPO/GITHUB_TOKEN)
+# i — w trybie automatycznym — rozsyłają do komputerów.
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            panel/package-lock.json
+      - name: Wersja z tagu
+        id: v
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - run: npm ci
+        working-directory: server
+      - run: npm ci
+        working-directory: panel
+      - name: Testy (bez e2e — te wymagają uruchomionych procesów)
+        run: scripts/check.sh --no-e2e
+      - name: Budowanie agenta
+        run: scripts/build-agents.sh "${{ steps.v.outputs.version }}"
+      - name: Podpis manifestu
+        env:
+          OVERVNC_SIGNING_KEY: ${{ secrets.OVERVNC_SIGNING_KEY }}
+        run: node scripts/release-manifest.mjs dist/agents "${{ steps.v.outputs.version }}"
+      - name: Weryfikacja podpisu kluczem wbudowanym w agenta
+        run: |
+          node -e '
+            const { createPublicKey, verify } = require("node:crypto"); const fs = require("node:fs");
+            const pub = fs.readFileSync("agent/update.go", "utf8").match(/updatePublicKeyB64 = "([^"]+)"/)[1];
+            const key = createPublicKey({ key: Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), Buffer.from(pub, "base64")]), format: "der", type: "spki" });
+            if (!verify(null, fs.readFileSync("dist/agents/manifest.json"), key, fs.readFileSync("dist/agents/manifest.json.sig"))) { console.error("Podpis NIE pasuje do klucza w agencie!"); process.exit(1); }
+            console.log("Podpis zgodny z kluczem agenta.");'
+      - name: Publikacja wydania
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/agents/* --title "OVERVNC $GITHUB_REF_NAME" --generate-notes

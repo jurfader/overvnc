@@ -135,6 +135,16 @@ export interface TextFile {
   tooLarge?: boolean;
 }
 
+export interface UpdatesStatus {
+  policy: 'auto' | 'manual';
+  target: string | null;
+  latest: string | null;
+  releases: { version: string; created: string | null; platforms: string[] }[];
+  source: { configured: boolean; repo: string | null; lastCheck: number | null; lastError: string | null };
+  agents: { version: string; count: number; online: number }[];
+  outdated: number;
+}
+
 export type PowerAction = 'reboot' | 'shutdown' | 'cancel' | 'logoff' | 'lock';
 export type ServiceAction = 'start' | 'stop' | 'restart' | 'enable' | 'disable';
 
@@ -327,6 +337,14 @@ export const api = {
   downloadUrl: (id: string, path: string, zip = false) => `/api/agents/${id}/files/download?path=${encodeURIComponent(path)}${zip ? '&zip=1' : ''}`,
   uploadUrl: (id: string, dir: string, name: string, overwrite: boolean) =>
     `/api/agents/${id}/files/upload?dir=${encodeURIComponent(dir)}&name=${encodeURIComponent(name)}${overwrite ? '&overwrite=1' : ''}`,
+
+  // aktualizacje agentów
+  updates: () => request<UpdatesStatus>('GET', '/api/updates'),
+  updatesCheck: () => request<{ added: string | null; latest: string | null; queued: number }>('POST', '/api/updates/check', {}),
+  updatesPolicy: (policy: 'auto' | 'manual') => request<{ policy: string }>('PUT', '/api/updates/policy', { policy }),
+  updatesApprove: (version: string) => request<{ target: string; queued: number }>('POST', '/api/updates/approve', { version }),
+  updatesRollout: () => request<{ queued: number }>('POST', '/api/updates/rollout', {}),
+  upgradeAgent: (id: string) => request<{ status: string; version: string }>('POST', `/api/agents/${id}/update`, {}),
 
   wakeInfo: (id: string) => request<{ possible: boolean; reason: 'no_mac' | 'no_relay' | null; relay: { id: string; name: string } | null; macs: string[] }>('GET', `/api/agents/${id}/wake`),
   wake: (id: string) => request<{ ok: true; relay: { id: string; name: string } }>('POST', `/api/agents/${id}/wake`, {}),

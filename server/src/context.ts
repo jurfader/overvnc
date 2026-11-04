@@ -3,6 +3,7 @@ import type { Db } from './db.ts';
 import type { Hub } from './hub.ts';
 import type { RateLimiter } from './ratelimit.ts';
 import type { Role } from './permissions.ts';
+import type { UpdateStore } from './updates.ts';
 
 /** Zależności współdzielone przez wszystkie moduły tras. */
 export interface Ctx {
@@ -11,6 +12,10 @@ export interface Ctx {
   hub: Hub;
   /** Klucz AES-256 do szyfrowania sekretów w bazie. */
   secretKey: Buffer;
+  /** Wydania agenta i polityka aktualizacji. */
+  updates: UpdateStore;
+  /** Wysyła „sprawdź aktualizację” do nieaktualnych komputerów (ustawiane przez trasy aktualizacji). */
+  rollout?: (ids?: string[]) => number;
   limits: {
     login: RateLimiter;
     enroll: RateLimiter;

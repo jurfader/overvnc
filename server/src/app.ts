@@ -19,6 +19,8 @@ import { clientRoutes } from './routes/clients.ts';
 import { remoteRoutes } from './routes/remote.ts';
 import { terminalRoutes } from './routes/terminal.ts';
 import { fileRoutes } from './routes/files.ts';
+import { updateRoutes } from './routes/updates.ts';
+import { UpdateStore } from './updates.ts';
 import { loadOrCreateKey } from './crypto.ts';
 
 const CSP = [
@@ -45,12 +47,29 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
     db,
     hub,
     secretKey: loadOrCreateKey(config.keyFile),
+    updates: new UpdateStore(db, config.updatesDir, config.releasePublicKey),
     limits: {
       login: new RateLimiter(10, 15 * 60 * 1000), // 10 prób / 15 min / IP
       enroll: new RateLimiter(20, 15 * 60 * 1000),
     },
   };
+  // co 15 min sprawdzamy GitHuba; nowe wydanie w trybie automatycznym od razu trafia do komputerów
+  let poll: NodeJS.Timeout | undefined;
+  if (config.github) {
+    const check = () =>
+      ctx.updates.syncFromGitHub(config.github!).then(
+        (added) => {
+          if (added) app.log.info(`nowe wydanie agenta: ${added}`);
+          if (added && ctx.updates.policy() === 'auto') ctx.rollout?.();
+        },
+        (err) => app.log.warn(`sprawdzanie wydań na GitHubie: ${(err as Error).message}`),
+      );
+    setTimeout(check, 10_000).unref();
+    poll = setInterval(check, 15 * 60_000);
+    poll.unref();
+  }
   app.addHook('onClose', async () => {
+    clearInterval(poll);
     hub.close();
     ctx.limits.login.close();
     ctx.limits.enroll.close();
@@ -75,6 +94,7 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
   await clientRoutes(app, ctx);
   await remoteRoutes(app, ctx);
   await fileRoutes(app, ctx);
+  await updateRoutes(app, ctx);
   await wsRoutes(app, ctx);
   await terminalRoutes(app, ctx);
 

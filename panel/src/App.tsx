@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Building2, ChevronRight, LogOut, Menu, Monitor, Moon, PlusCircle, ScrollText, Sun, UserCog, Users, X, type LucideIcon } from 'lucide-react';
+import { Building2, ChevronRight, CloudDownload, LogOut, Menu, Monitor, Moon, PlusCircle, ScrollText, Sun, UserCog, Users, X, type LucideIcon } from 'lucide-react';
 import { api, type Agent, type Me, type Permission } from './api.ts';
 import { useLiveEvents, type LiveEvent } from './live.ts';
 import { applyTheme, readTheme, Toasts, type Theme } from './components.tsx';
@@ -13,6 +13,7 @@ import { Audit } from './pages/Audit.tsx';
 import { Clients } from './pages/Clients.tsx';
 import { Team } from './pages/Team.tsx';
 import { Account } from './pages/Account.tsx';
+import { Updates } from './pages/Updates.tsx';
 
 /** Routing w hashu: "#/sciezka?param=wartosc". */
 function useHashRoute(): { path: string; query: URLSearchParams } {
@@ -159,6 +160,7 @@ function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme
       title: 'System',
       items: [
         { href: '/team', label: 'Zespół', icon: Users, perm: 'team.manage', match: (p) => p === '/team' },
+        { href: '/updates', label: 'Aktualizacje', icon: CloudDownload, perm: 'agents.manage', match: (p) => p === '/updates', global: true },
         { href: '/audit', label: 'Dziennik zdarzeń', icon: ScrollText, perm: 'audit.view', match: (p) => p === '/audit', global: true },
       ],
     },
@@ -175,6 +177,7 @@ function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme
   else if (path === '/team' && can('team.manage')) page = <Team />;
   else if (path === '/audit' && can('audit.view') && me.allClients) page = <Audit />;
   else if (path === '/account') page = <Account />;
+  else if (path === '/updates' && can('agents.manage') && me.allClients) page = <Updates />;
   else page = <Machines agents={list} initialClient={query.get('client') ? Number(query.get('client')) : null} />;
 
   return (

@@ -3,6 +3,7 @@
 // Użycie:
 //
 //	overvnc-agent install --server https://overvnc.example.com --token ovnc_XXXX   (rejestracja + usługa systemowa)
+//	overvnc-agent install --server ... --token ... --defer   (obraz ISO: rejestracja przy pierwszym uruchomieniu)
 //	overvnc-agent uninstall [--purge]
 //	overvnc-agent run                       (tryb pierwszoplanowy; tak też uruchamia go usługa)
 //	overvnc-agent enroll --server ... --token ...   (tylko rejestracja, bez usługi)
@@ -11,6 +12,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -19,7 +21,7 @@ import (
 	"github.com/kardianos/service"
 )
 
-var version = "0.5.0-dev" // nadpisywane przy budowaniu: -ldflags "-X main.version=..."
+var version = "0.6.0-dev" // nadpisywane przy budowaniu: -ldflags "-X main.version=..."
 
 const serviceName = "overvnc-agent"
 
@@ -36,12 +38,17 @@ func (p *program) Start(s service.Service) error {
 	if err != nil {
 		return fmt.Errorf("brak konfiguracji (%s) — najpierw uruchom 'enroll' lub 'install': %w", p.cfgPath, err)
 	}
+	// po aktualizacji: jeśli nowa wersja wielokrotnie nie wstała, wróć do poprzedniej
+	checkUpdateRollback(p.cfgPath)
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
 	p.done = make(chan struct{})
 	go func() {
 		defer close(p.done)
-		runAgent(ctx, cfg)
+		if !ensureIdentity(ctx, p.cfgPath, cfg) {
+			return
+		}
+		runAgent(ctx, p.cfgPath, cfg)
 	}()
 	return nil
 }
@@ -83,6 +90,8 @@ func main() {
 	token := fs.String("token", "", "token rejestracji z panelu")
 	insecure := fs.Bool("insecure", false, "zezwól na nieszyfrowane http:// (TYLKO do testów)")
 	purge := fs.Bool("purge", false, "uninstall: usuń także konfigurację")
+	forceUpdates := fs.Bool("updates", false, "run: włącz automatyczne aktualizacje także poza usługą (testy)")
+	deferEnroll := fs.Bool("defer", false, "zapisz tylko token — komputer zarejestruje się sam przy pierwszym uruchomieniu usługi (obraz ISO)")
 	_ = fs.Parse(os.Args[2:])
 
 	abs, err := filepath.Abs(*cfgPath)
@@ -95,16 +104,25 @@ func main() {
 		fmt.Println(version)
 
 	case "enroll":
-		must(enroll(*cfgPath, *serverURL, *token, *insecure))
-		fmt.Println("Zarejestrowano. Konfiguracja:", *cfgPath)
+		must(enroll(*cfgPath, *serverURL, *token, *insecure, *deferEnroll))
+		fmt.Println("Zapisano konfigurację:", *cfgPath)
 
 	case "install":
 		requireAdmin()
-		if _, err := loadConfig(*cfgPath); err != nil {
-			must(enroll(*cfgPath, *serverURL, *token, *insecure))
-			fmt.Println("Zarejestrowano w serwerze.")
+		if _, err := loadConfig(*cfgPath); err == nil {
+			fmt.Println("Agent już skonfigurowany — pomijam rejestrację.")
+		} else if *deferEnroll {
+			must(enroll(*cfgPath, *serverURL, *token, *insecure, true))
+			fmt.Println("Zapisano token — komputer zarejestruje się sam przy pierwszym uruchomieniu usługi.")
+		} else if err := enroll(*cfgPath, *serverURL, *token, *insecure, false); err != nil {
+			if errors.Is(err, errEnrollRejected) || *serverURL == "" || *token == "" {
+				must(err)
+			}
+			// brak sieci przy instalacji nie przerywa jej — usługa zarejestruje komputer, gdy połączenie wróci
+			must(enroll(*cfgPath, *serverURL, *token, *insecure, true))
+			fmt.Println("Serwer niedostępny (", err, ") — komputer zarejestruje się automatycznie po połączeniu.")
 		} else {
-			fmt.Println("Agent już zarejestrowany — pomijam rejestrację.")
+			fmt.Println("Zarejestrowano w serwerze.")
 		}
 		svc, _, err := newService(*cfgPath)
 		must(err)
@@ -143,6 +161,10 @@ func main() {
 			if l, err := svc.Logger(nil); err == nil {
 				logger = l
 			}
+			updatesEnabled = true // tylko usługa systemowa może podmienić binarkę i zostać uruchomiona ponownie
+		}
+		if *forceUpdates {
+			updatesEnabled = true
 		}
 		must(svc.Run())
 
@@ -156,6 +178,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `OVERVNC Agent %s
 
   install   --server URL --token TOKEN   rejestracja i instalacja usługi (wymaga admina/roota)
+            [--defer]                    obraz ISO/sysprep: rejestracja przy pierwszym uruchomieniu
   uninstall [--purge]                    usunięcie usługi
   run                                    uruchomienie w trybie pierwszoplanowym
   enroll    --server URL --token TOKEN   tylko rejestracja

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { Activity, ArrowLeft, Building2, Cog, FolderOpen, LayoutDashboard, TerminalSquare, Clock, Cpu, HardDrive, Info, MemoryStick, Network, Package, Pencil, RefreshCw, Search, Trash2, Users } from 'lucide-react';
+import { Activity, ArrowLeft, Building2, CloudDownload, Cog, FolderOpen, LayoutDashboard, TerminalSquare, Clock, Cpu, HardDrive, Info, MemoryStick, Network, Package, Pencil, RefreshCw, Search, Trash2, Users } from 'lucide-react';
 import { api, errorMessage, type Agent, type AgentDetail } from '../api.ts';
 import { Button, CardHead, ClientLabel, EmptyState, Meter, Modal, OsBadge, StatTile, Status, TagChip, toast } from '../components.tsx';
 import { useMe } from '../state.tsx';
@@ -29,6 +29,7 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
   const [swQuery, setSwQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [updating, setUpdating] = useState(false);
   const { can } = useMe();
   const remote = can('agents.remote');
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -107,6 +108,25 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
           {can('agents.manage') && (
             <Button icon={Pencil} onClick={() => setEditOpen(true)}>
               Edytuj
+            </Button>
+          )}
+          {can('agents.manage') && a.online && a.capabilities.includes('update.check') && (
+            <Button
+              icon={CloudDownload}
+              loading={updating}
+              onClick={async () => {
+                setUpdating(true);
+                try {
+                  const r = await api.upgradeAgent(id);
+                  toast(r.status === 'restarting' ? 'Aktualizacja zainstalowana — agent uruchamia się ponownie' : r.status === 'up_to_date' ? `Agent jest aktualny (${r.version})` : `Stan: ${r.status}`);
+                } catch (err) {
+                  toast(errorMessage(err), 'err');
+                } finally {
+                  setUpdating(false);
+                }
+              }}
+            >
+              Aktualizuj agenta
             </Button>
           )}
           {can('agents.refresh') && (

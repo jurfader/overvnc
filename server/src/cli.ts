@@ -3,10 +3,12 @@
 //   npm run cli -- reset-2fa <login>    wyłącz 2FA (np. po utracie telefonu) — przy logowaniu trzeba je skonfigurować od nowa
 //   npm run cli -- unlock <login>       odblokuj konto
 //   npm run cli -- users                lista kont
+//   npm run cli -- import-release <kat> import podpisanego wydania agenta z katalogu (bez GitHuba)
 import { createInterface } from 'node:readline/promises';
 import { loadConfig } from './config.ts';
 import { audit, openDb } from './db.ts';
 import { hashPassword } from './crypto.ts';
+import { UpdateStore } from './updates.ts';
 
 const db = openDb(loadConfig().dbFile);
 const [cmd, arg] = process.argv.slice(2);
@@ -38,6 +40,16 @@ if (cmd === 'passwd' && arg) {
   if (db.prepare('UPDATE users SET disabled = 0 WHERE username = ?').run(arg).changes === 0) fail(`Brak konta "${arg}".`);
   audit(db, 'system', 'user.unlock', arg, { via: 'cli' });
   console.log(`Odblokowano "${arg}".`);
+} else if (cmd === 'import-release' && arg) {
+  const cfg = loadConfig();
+  const store = new UpdateStore(db, cfg.updatesDir, cfg.releasePublicKey);
+  try {
+    const added = await store.importDir(arg);
+    audit(db, 'system', 'update.import', null, { dir: arg, version: store.latest()?.version, added, via: 'cli' });
+    console.log(added ? `Zaimportowano wydanie ${store.latest()?.version}.` : 'To wydanie już jest na serwerze.');
+  } catch (err) {
+    fail(`Import nieudany: ${(err as Error).message}`);
+  }
 } else if (cmd === 'users') {
   console.table(
     db
@@ -47,7 +59,7 @@ if (cmd === 'passwd' && arg) {
       .all(),
   );
 } else {
-  console.log('Użycie: npm run cli -- passwd <login> | reset-2fa <login> | unlock <login> | users');
+  console.log('Użycie: npm run cli -- passwd <login> | reset-2fa <login> | unlock <login> | users | import-release <katalog>');
   process.exit(1);
 }
 

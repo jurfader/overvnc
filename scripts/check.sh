@@ -28,5 +28,7 @@ npm run build --silent >/dev/null && echo "  ✔ build"
 if [ "${1:-}" != "--no-e2e" ]; then
   step "end-to-end"
   "$ROOT/scripts/e2e.sh"
+  step "end-to-end: automatyczna aktualizacja agenta"
+  "$ROOT/scripts/e2e-update.sh"
 fi
 printf '\n\033[1;32m✔ Wszystko OK\033[0m\n'

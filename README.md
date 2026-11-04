@@ -25,7 +25,7 @@ cd server && npm test       # testy serwera (node:test)
 cd agent && go test ./...   # testy agenta
 ```
 
-## Funkcje (v0.5.0)
+## Funkcje (v0.6.0)
 
 **Komputery**
 - rejestracja tokenem (jednorazowym lub wielokrotnym, z terminem ważności, opcjonalnie od razu przypisującym klienta i lokalizację); każdy agent dostaje własny sekret
@@ -78,13 +78,49 @@ Windows `C:\ProgramData\OVERVNC\agent.json` · macOS `/Library/Application Suppo
 
 Odinstalowanie: `overvnc-agent uninstall --purge`
 
+## Wydania i automatyczne aktualizacje
+
+```bash
+git tag v0.6.1 && git push origin v0.6.1
+```
+
+GitHub Actions ([release.yml](.github/workflows/release.yml)) uruchamia testy i buduje agenta na 6 platform. Potem podpisuje manifest kluczem Ed25519 z sekretu `OVERVNC_SIGNING_KEY`, sprawdza, czy podpis pasuje do klucza wbudowanego w agenta, i publikuje Release. Serwer co 15 min sprawdza GitHuba (`GITHUB_REPO`, `GITHUB_TOKEN` tylko do odczytu), **sam weryfikuje podpis i sumy kontrolne**, a w trybie automatycznym rozsyła wersję do komputerów z odstępem 2 s. W trybie ręcznym czeka na „Zatwierdź” w panelu (System → Aktualizacje).
+
+Agent pobiera binarkę z serwera i **weryfikuje podpis kluczem wbudowanym w siebie**, więc przejęty serwer nie podsunie mu obcego pliku. Potem podmienia plik i kończy działanie, a menedżer usług uruchamia nową wersję. Jeśli nowa wersja 3 razy nie połączy się z serwerem, agent przywraca poprzednią i nie instaluje już tej wersji.
+
+- Klucz prywatny: `~/.overvnc/signing-key.pem` (kopia zapasowa poza repozytorium!) oraz sekret repozytorium. Utrata klucza oznacza konieczność nowego klucza i reinstalacji agentów.
+- Serwer bez GitHuba: `npm run cli -- import-release <katalog z manifest.json, .sig i binarkami>`.
+
+## Obraz ISO (kiosk)
+
+```bash
+scripts/kiosk-package.sh https://vnc.overmedia.pl ovnc_TOKEN 0.6.0
+```
+
+Polecenie tworzy `dist/overvnc-kiosk/` z agentem, `install-overvnc.cmd`, `SetupComplete.cmd` i instrukcją `README-ISO.txt` (NTLite, `$OEM$`, sysprep). W obrazie jest tylko token, bez tożsamości. Każdy komputer rejestruje się sam przy pierwszym połączeniu z siecią (`install --defer`), a sklonowany dysk wykrywa zmianę sprzętu (identyfikator systemu i MAC fizycznych kart) i rejestruje się jako nowy komputer. Token w panelu powinien być wielokrotnego użytku, z długą ważnością i przypisanym klientem.
+
 ## Wdrożenie na VPS
 
 ```bash
-cd panel && npm ci && npm run build
-cd ../server && npm ci --omit=dev
-HOST=127.0.0.1 PORT=8080 COOKIE_SECURE=1 TRUST_PROXY=1 DATA_DIR=/var/lib/overvnc node src/index.ts
+scripts/deploy.sh srv      # buduje panel, przesyła i instaluje (deploy/install-srv.sh)
 ```
+
+Instalacja jest idempotentna:
+
+- użytkownik systemowy `overvnc`;
+- własny Node w `/opt/overvnc/node` (systemowy zostaje nietknięty);
+- aplikacja w `/opt/overvnc/app`, dane w `/var/lib/overvnc`;
+- konfiguracja w `/etc/overvnc/server.env`;
+- usługa systemd `overvnc` z utwardzeniem (zapis tylko do katalogu danych), nasłuch tylko na `127.0.0.1:20300`.
+
+Za Cloudflare Tunnel (jak na `srv`) wystarczy dopisać do `/etc/cloudflared/config.yml` pozycję przed `http_status:404`:
+
+```yaml
+  - hostname: vnc.overmedia.pl
+    service: http://localhost:20300
+```
+
+Do tego rekord DNS `CNAME vnc → <id-tunelu>.cfargotunnel.com` (z proxy) albo `cloudflared tunnel route dns <tunel> vnc.overmedia.pl`. Nie trzeba otwierać żadnych portów na routerze. `TRUST_PROXY=1` jest wymagane, bo bez niego wszyscy mają adres `127.0.0.1`, a limit prób logowania blokowałby wszystkich naraz. Cloudflare zamyka bezczynne WebSockety po ok. 100 s, dlatego serwer i agent wysyłają ping co 30 s.
 
 Przed serwerem reverse proxy z HTTPS, np. Caddy (certyfikat Let's Encrypt automatycznie):
 
@@ -117,6 +153,7 @@ npm run cli -- unlock <login>     # odblokowanie konta
 | 1 | Organizacja: klienci, lokalizacje i tagi; zespół z rolami; 2FA | ✅ v0.3.0 |
 | 2 | Praca zdalna: terminal interaktywny, procesy i usługi, zasilanie i Wake-on-LAN | ✅ v0.4.0 |
 | 3 | Menedżer plików | ✅ v0.5.0 |
+| — | Obraz ISO kiosku: rejestracja przy pierwszym uruchomieniu, wykrywanie klonów, podpisane automatyczne aktualizacje z wycofaniem | ✅ v0.6.0 |
 | 4 | Monitoring: historia i wykresy, stan bezpieczeństwa, historia zmian, alerty i powiadomienia | ⏳ |
 | 5 | Automatyzacja: biblioteka skryptów, zadania zaplanowane, wdrażanie programów i aktualizacji | |
 | 6 | Pulpit zdalny + aplikacja w zasobniku (zgoda, czat) | |

@@ -23,12 +23,14 @@ const (
 var errUnauthorized = errors.New("serwer odrzucił dane agenta (agent usunięty z panelu?)")
 
 // runAgent utrzymuje połączenie z serwerem aż do anulowania ctx.
-func runAgent(ctx context.Context, cfg *Config) {
+func runAgent(ctx context.Context, cfgPath string, cfg *Config) {
 	logger.Infof("OVERVNC Agent %s, serwer: %s", version, cfg.ServerURL)
+	setUpdateContext(cfg, cfgPath)
+	go updateLoop(ctx, cfg, cfgPath)
 	backoff := time.Second
 	for {
 		started := time.Now()
-		err := session(ctx, cfg)
+		err := session(ctx, cfg, cfgPath)
 		if ctx.Err() != nil {
 			return
 		}
@@ -55,7 +57,7 @@ func runAgent(ctx context.Context, cfg *Config) {
 	}
 }
 
-func session(parent context.Context, cfg *Config) error {
+func session(parent context.Context, cfg *Config, cfgPath string) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
@@ -73,6 +75,9 @@ func session(parent context.Context, cfg *Config) error {
 	defer conn.CloseNow()
 	conn.SetReadLimit(16 << 20)
 	logger.Info("połączono z serwerem")
+	// stabilne połączenie po aktualizacji = aktualizacja udana (inaczej po 3 startach wycofanie)
+	healthy := time.AfterFunc(updateHealthyAfter, func() { markUpdateHealthy(cfgPath) })
+	defer healthy.Stop()
 
 	// coder/websocket pozwala na współbieżne Write, więc odpowiedzi, zdarzenia i strumienie mogą iść z wielu gorutyn
 	write := func(env Envelope) error {

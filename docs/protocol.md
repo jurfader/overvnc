@@ -92,6 +92,14 @@ W `hello` agent wysyła listę obsługiwanych poleceń. Serwer odrzuca polecenie
 | `fs.read` `{channel, path, zip}` | 0.5.0 | strumień pobierania; katalog jako ZIP w locie (nazwy UTF-8) |
 | `fs.write` `{channel, dir, name, size, overwrite}` + `fs.commit` | 0.5.0 | strumień wysyłania do pliku tymczasowego, zatwierdzenie atomowe |
 
+| `update.check` | 0.6.0 | natychmiastowe sprawdzenie i instalacja aktualizacji; wynik `{status: up_to_date \| restarting \| skipped \| disabled}` |
+
+### Aktualizacje (HTTP, uwierzytelnienie kluczem agenta)
+
+- `GET /api/agent/update?version=&platform=windows-amd64` zwraca `204`, gdy agent jest aktualny, albo `{version, manifest (base64), signature (base64), download}`. Agent sprawdza podpis Ed25519 manifestu kluczem wbudowanym w binarkę, potem rozmiar i SHA-256 pobranego pliku.
+- `GET /api/agent/update/<wersja>/<platforma>` zwraca binarkę.
+- Agent pyta 2 min po starcie i potem co ok. 6 h, a natychmiast po `update.check`.
+
 W `hello` agent wysyła też `shells` (dostępne powłoki) i `runAs` (konto, na którym działa).
 
 ### Zgodność

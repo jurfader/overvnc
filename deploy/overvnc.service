@@ -1,0 +1,36 @@
+[Unit]
+Description=OVERVNC server (zdalne zarządzanie komputerami)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=overvnc
+Group=overvnc
+WorkingDirectory=/opt/overvnc/app/server
+EnvironmentFile=/etc/overvnc/server.env
+ExecStart=/opt/overvnc/node/bin/node src/index.ts
+Restart=always
+RestartSec=3
+# łagodne zamknięcie: serwer zapisuje dziennik sesji i zamyka bazę na SIGTERM
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+# utwardzenie: tylko odczyt systemu, zapis wyłącznie do katalogu danych
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+ReadWritePaths=/var/lib/overvnc
+StateDirectory=overvnc
+StateDirectoryMode=0700
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

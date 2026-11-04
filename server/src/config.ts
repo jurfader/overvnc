@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { RELEASE_PUBLIC_KEY } from './updates.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -22,6 +23,12 @@ export interface Config {
   requireMfa: boolean;
   /** Maks. rozmiar wysyłanego pliku (MAX_UPLOAD_MB, domyślnie 10 GB). */
   maxUploadBytes: number;
+  /** Katalog wydań agenta (pobranych z GitHuba). */
+  updatesDir: string;
+  /** Źródło wydań: prywatne repo GitHub (GITHUB_REPO=jurfader/overvnc, GITHUB_TOKEN tylko do odczytu). */
+  github: { repo: string; token: string } | null;
+  /** Klucz publiczny wydań (base64, Ed25519) — domyślnie wbudowany; zmiana tylko przy rotacji klucza. */
+  releasePublicKey: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -38,5 +45,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     keyFile: path.join(dataDir, 'secret.key'),
     requireMfa: env.REQUIRE_2FA !== '0',
     maxUploadBytes: Number(env.MAX_UPLOAD_MB ?? 10 * 1024) * 1024 * 1024,
+    updatesDir: path.join(dataDir, 'updates'),
+    github: env.GITHUB_REPO && env.GITHUB_TOKEN ? { repo: env.GITHUB_REPO, token: env.GITHUB_TOKEN } : null,
+    releasePublicKey: env.RELEASE_PUBLIC_KEY ?? RELEASE_PUBLIC_KEY,
   };
 }
