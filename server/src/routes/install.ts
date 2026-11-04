@@ -99,9 +99,13 @@ if command -v sha256sum >/dev/null 2>&1; then GOT=$(sha256sum "$TMP" | awk '{pri
 mkdir -p /usr/local/bin
 if [ -f "$CFG" ]; then
   echo "Agent jest już zainstalowany — aktualizacja pliku i ponowne uruchomienie usługi."
-  "$DEST" stop >/dev/null 2>&1 || true
   install -m 0755 "$TMP" "$DEST"
-  "$DEST" start
+  # restart jednym poleceniem systemu — stop+start (launchctl unload/load) potrafi się „rozminąć” i usługa zostaje wyłączona
+  if [ "$OS" = darwin ]; then
+    launchctl kickstart -k system/overvnc-agent 2>/dev/null || launchctl load -w /Library/LaunchDaemons/overvnc-agent.plist
+  else
+    systemctl restart overvnc-agent 2>/dev/null || "$DEST" start
+  fi
 else
   install -m 0755 "$TMP" "$DEST"
   "$DEST" install --server "$SERVER" --token "$TOKEN"

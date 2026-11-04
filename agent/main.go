@@ -16,8 +16,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/kardianos/service"
 )
@@ -157,7 +161,7 @@ func main() {
 		requireAdmin()
 		svc, _, err := newService(*cfgPath)
 		must(err)
-		must(service.Control(svc, cmd))
+		must(controlAgentService(svc, cmd))
 
 	case "status":
 		svc, _, err := newService(*cfgPath)
@@ -226,3 +230,25 @@ func (c consoleLogger) Warningf(f string, a ...interface{}) error {
 	return c.Warning(fmt.Sprintf(f, a...))
 }
 func (c consoleLogger) Infof(f string, a ...interface{}) error { return c.Info(fmt.Sprintf(f, a...)) }
+
+// controlAgentService — start/stop/restart usługi agenta. Na macOS restart przez „launchctl kickstart -k” (jednym ruchem),
+// a start ponawiany: launchctl load zaraz po unload bywa odrzucany, gdy poprzedni proces jeszcze się kończy.
+func controlAgentService(svc service.Service, cmd string) error {
+	if runtime.GOOS == "darwin" && cmd == "restart" {
+		if out, err := exec.Command("launchctl", "kickstart", "-k", "system/"+serviceName).CombinedOutput(); err == nil {
+			return nil
+		} else {
+			logger.Warningf("launchctl kickstart: %v %s", err, strings.TrimSpace(string(out)))
+		}
+	}
+	err := service.Control(svc, cmd)
+	if err != nil && cmd == "start" {
+		for range 5 {
+			time.Sleep(time.Second)
+			if err = service.Control(svc, cmd); err == nil {
+				break
+			}
+		}
+	}
+	return err
+}
