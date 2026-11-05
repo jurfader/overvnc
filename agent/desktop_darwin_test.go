@@ -4,6 +4,10 @@ package main
 
 import (
 	"os"
+	"strings"
+
+	"golang.org/x/image/font/opentype"
+	"golang.org/x/image/font/sfnt"
 	"os/exec"
 	"testing"
 	"time"
@@ -132,5 +136,17 @@ func TestMacOverlayExcludedFromCapture(t *testing.T) {
 	t.Logf("wyłączone okna ramki: %s", b.sck.excluded)
 	if cmd.ProcessState != nil {
 		t.Fatal("proces ramki zakończył się przedwcześnie")
+	}
+}
+
+func TestMacOverlayFontsAreSystemFonts(t *testing.T) {
+	f := loadOverlayFonts()
+	for _, ft := range []*opentype.Font{f.bold, f.regular} {
+		name, _ := ft.Name(nil, sfnt.NameIDFull)
+		t.Logf("czcionka: %s", name)
+		// systemowa czcionka macOS, nie zapasowa wbudowana w agenta (Go)
+		if name == "" || strings.HasPrefix(name, "Go ") {
+			t.Fatalf("oczekiwano czcionki systemowej, jest %q", name)
+		}
 	}
 }

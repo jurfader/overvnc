@@ -125,7 +125,7 @@ func newOverlayWin(frame nsRect, scale float64) *overlayWin {
 	view.Send(sel("setWantsLayer:"), true)
 	layer := view.Send(sel("layer"))
 	layer.Send(sel("setContentsScale:"), scale)
-	layer.Send(sel("setContentsGravity:"), nsString([]byte("resize\x00")))
+	layer.Send(sel("setContentsGravity:"), nsString([]byte("topLeft\x00"))) // bez przeskalowania obrazu
 	w.Send(sel("setAlphaValue:"), 0.0)
 	w.Send(sel("orderFrontRegardless"))
 	return &overlayWin{win: w, layer: layer}
@@ -227,8 +227,14 @@ func runOverlayProcess(name string) int {
 				} else {
 					lay = newNotchLayout(name, sc)
 				}
+				// rozmiar i położenie w pełnych pikselach ekranu — inaczej macOS rozmywa obraz o pół piksela
+				if k := int(sc); k > 1 {
+					lay.W += (k - lay.W%k) % k
+					lay.H += (k - lay.H%k) % k
+				}
+				xpx := math.Round((f.W*sc - float64(lay.W)) / 2)
 				wpt, hpt := float64(lay.W)/sc, float64(lay.H)/sc
-				s.notch = newOverlayWin(nsRect{X: f.X + (f.W-wpt)/2, Y: f.Y + f.H - hpt, W: wpt, H: hpt}, sc)
+				s.notch = newOverlayWin(nsRect{X: f.X + xpx/sc, Y: f.Y + f.H - hpt, W: wpt, H: hpt}, sc)
 				s.layout = lay
 			}
 			screens = append(screens, s)

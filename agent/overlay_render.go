@@ -15,6 +15,7 @@ import (
 	"golang.org/x/image/font/gofont/gobold"
 	"golang.org/x/image/font/gofont/goregular"
 	"golang.org/x/image/font/opentype"
+	"golang.org/x/image/font/sfnt"
 	"golang.org/x/image/math/fixed"
 	"golang.org/x/image/vector"
 )
@@ -158,8 +159,9 @@ func loadOverlayFonts() overlayFonts {
 			boldPaths = []string{filepath.Join(dir, "seguisb.ttf"), filepath.Join(dir, "segoeuib.ttf")}
 			regPaths = []string{filepath.Join(dir, "segoeui.ttf")}
 		case "darwin":
-			boldPaths = []string{"/System/Library/Fonts/Supplemental/Arial Bold.ttf"}
-			regPaths = []string{"/System/Library/Fonts/Supplemental/Arial.ttf"}
+			// Helvetica Neue — systemowa czcionka macOS (kolekcja .ttc: odmiana po nazwie)
+			boldPaths = []string{"/System/Library/Fonts/HelveticaNeue.ttc#Medium", "/System/Library/Fonts/HelveticaNeue.ttc#Bold", "/System/Library/Fonts/Supplemental/Arial Bold.ttf"}
+			regPaths = []string{"/System/Library/Fonts/HelveticaNeue.ttc#Regular", "/System/Library/Fonts/Supplemental/Arial.ttf"}
 		}
 		fonts.bold = firstFont(boldPaths, gobold.TTF)
 		fonts.regular = firstFont(regPaths, goregular.TTF)
@@ -169,6 +171,12 @@ func loadOverlayFonts() overlayFonts {
 
 func firstFont(paths []string, fallback []byte) *opentype.Font {
 	for _, p := range paths {
+		if file, sub, ok := strings.Cut(p, "#"); ok {
+			if f := collectionFont(file, sub); f != nil {
+				return f
+			}
+			continue
+		}
 		if b, err := os.ReadFile(p); err == nil {
 			if f, err := opentype.Parse(b); err == nil {
 				return f
@@ -177,6 +185,28 @@ func firstFont(paths []string, fallback []byte) *opentype.Font {
 	}
 	f, _ := opentype.Parse(fallback)
 	return f
+}
+
+// collectionFont — odmiana (np. „Medium”) z kolekcji czcionek .ttc.
+func collectionFont(path, subfamily string) *opentype.Font {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	c, err := opentype.ParseCollection(b)
+	if err != nil {
+		return nil
+	}
+	for i := range c.NumFonts() {
+		f, err := c.Font(i)
+		if err != nil {
+			continue
+		}
+		if name, err := f.Name(nil, sfnt.NameIDSubfamily); err == nil && name == subfamily {
+			return f
+		}
+	}
+	return nil
 }
 
 func face(f *opentype.Font, size float64) font.Face {
@@ -307,14 +337,15 @@ func renderNotch(l *notchLayout, t, p0, p1 float64) *image.RGBA {
 	d := font.Drawer{Dst: img, Src: image.NewUniform(color.RGBA{246, 246, 252, 255}), Face: l.titleFace}
 	m := l.titleFace.Metrics()
 	if l.name == "" {
-		d.Dot = fixed.Point26_6{X: fixed.Int26_6(l.textX * 64), Y: fixed.Int26_6((cy*64 + float64(m.Ascent-m.Descent)/2))}
+		d.Dot = fixed.P(int(math.Round(l.textX)), int(math.Round(cy+float64(m.Ascent-m.Descent)/128)))
 		d.DrawString(l.title)
 		return img
 	}
-	d.Dot = fixed.Point26_6{X: fixed.Int26_6(l.textX * 64), Y: fixed.Int26_6((cy*64 + float64(m.Ascent-m.Descent)/2))}
+	// tekst w pełnych pikselach — ułamkowe położenie rozmywa litery
+	d.Dot = fixed.P(int(math.Round(l.textX)), int(math.Round(cy+float64(m.Ascent-m.Descent)/128)))
 	d.DrawString(l.title)
 	d2 := font.Drawer{Dst: img, Src: image.NewUniform(color.RGBA{190, 186, 214, 255}), Face: l.nameFace}
-	d2.Dot = fixed.Point26_6{X: fixed.Int26_6(l.textX * 64), Y: fixed.I(int(math.Round(l.top + 41*l.scale)))}
+	d2.Dot = fixed.P(int(math.Round(l.textX)), int(math.Round(l.top+41*l.scale)))
 	d2.DrawString(l.name)
 	return img
 }
