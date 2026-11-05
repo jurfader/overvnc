@@ -252,6 +252,64 @@ type macBackend struct {
 	lastButton int
 	clicks     int64
 	asked      bool
+	// ScreenCaptureKit (strumień) — zapasowo CoreGraphics na starszych systemach
+	sck        *sckStream
+	sckFailed  bool
+	lastSeq    uint64
+	force      bool
+	lastCursor cgPoint
+	screenOK   bool
+	lastPerm   time.Time
+}
+
+// invalidate — pełna klatka na żądanie przeglądarki, także bez zmian na ekranie.
+func (b *macBackend) invalidate() { b.force = true }
+
+// screenAllowed — zgoda „Nagrywanie ekranu” (sprawdzana co 2 s). Bez niej nie przechwytujemy wcale:
+// każda próba na nowym macOS wyświetlałaby użytkownikowi kolejne okno z pytaniem.
+func (b *macBackend) screenAllowed() bool {
+	if time.Since(b.lastPerm) > 2*time.Second {
+		b.screenOK, b.lastPerm = cgPreflightScreenCaptureAccess(), time.Now()
+	}
+	return b.screenOK
+}
+
+func cursorPos() (cgPoint, bool) {
+	ev := cgEventCreate(0)
+	if ev == 0 {
+		return cgPoint{}, false
+	}
+	p := cgEventGetLocation(ev)
+	cfRelease(ev)
+	return p, true
+}
+
+func (b *macBackend) captureSCK(m MonitorInfo) ([]byte, int, int, error) {
+	s := b.sck
+	moved := false
+	if b.cursorOn {
+		if p, ok := cursorPos(); ok && p != b.lastCursor {
+			b.lastCursor, moved = p, true
+		}
+	}
+	s.mu.Lock()
+	if s.seq == 0 || (s.seq == b.lastSeq && !b.force && !moved) {
+		s.mu.Unlock()
+		return nil, 0, 0, errNoChange
+	}
+	need := m.W * m.H * 4
+	if cap(b.out) < need {
+		b.out = make([]byte, need)
+	}
+	b.out = b.out[:need]
+	copy(b.out, s.front)
+	b.lastSeq = s.seq
+	s.mu.Unlock()
+	b.force = false
+	if b.cursorOn {
+		b.drawCursor(b.out, m)
+	}
+	return b.out, m.W, m.H, nil
 }
 
 func newDesktopBackend(_ bool) (desktopBackend, error) {
@@ -311,7 +369,33 @@ func (b *macBackend) capture(m MonitorInfo) ([]byte, int, int, error) {
 	if m.Index < 0 || m.Index >= len(b.ids) || m.W <= 0 || m.H <= 0 {
 		return nil, 0, 0, errors.New("brak monitora")
 	}
-	img := cgDisplayCreateImage(b.ids[m.Index])
+	if !b.screenAllowed() {
+		if b.sck != nil {
+			b.sck.stop()
+			b.sck = nil
+		}
+		return nil, 0, 0, errNoChange // panel pokazuje instrukcję (notice)
+	}
+	id := b.ids[m.Index]
+	if !b.sckFailed {
+		if s := b.sck; s == nil || s.display != id || s.w != m.W || s.h != m.H {
+			if s != nil {
+				s.stop()
+				b.sck = nil
+			}
+			ns, err := startSCK(id, m.W, m.H)
+			if err != nil {
+				b.sckFailed = true
+				helperLogHook(fmt.Sprintf("przechwytywanie ekranu: ScreenCaptureKit niedostępny (%v) — CoreGraphics", err))
+			} else {
+				b.sck, b.lastSeq = ns, 0
+			}
+		}
+		if b.sck != nil {
+			return b.captureSCK(m)
+		}
+	}
+	img := cgDisplayCreateImage(id)
 	if img == 0 {
 		return nil, 0, 0, errors.New("nie można przechwycić ekranu (Mac zablokowany albo brak zgody na nagrywanie)")
 	}
@@ -398,12 +482,10 @@ var cursorArrow = []string{
 }
 
 func (b *macBackend) drawCursor(dst []byte, m MonitorInfo) {
-	ev := cgEventCreate(0)
-	if ev == 0 {
+	p, ok := cursorPos()
+	if !ok {
 		return
 	}
-	p := cgEventGetLocation(ev)
-	cfRelease(ev)
 	cx, cy := int(p.X)-m.X, int(p.Y)-m.Y
 	for dy, line := range cursorArrow {
 		for dx, ch := range line {
@@ -423,7 +505,12 @@ func (b *macBackend) drawCursor(dst []byte, m MonitorInfo) {
 
 func (b *macBackend) setCursor(on bool)       { b.cursorOn = on }
 func (b *macBackend) interval() time.Duration { return 50 * time.Millisecond }
-func (b *macBackend) close()                  {}
+func (b *macBackend) close() {
+	if b.sck != nil {
+		b.sck.stop()
+		b.sck = nil
+	}
+}
 
 // setClipboard — tekst do schowka użytkownika (pbcopy w jego sesji; UTF-8).
 func (b *macBackend) setClipboard(text string) error {

@@ -105,6 +105,15 @@ func runDesktopHelper() int {
 		last     time.Time
 		lastErr  time.Time
 	)
+	// fullFrame — następna klatka w całości; backend z przechwytywaniem „tylko zmian” (DXGI, ScreenCaptureKit)
+	// musi wtedy oddać obraz nawet bez zmian na ekranie
+	fullFrame := func() {
+		enc.reset()
+		if f, ok := be.(interface{ invalidate() }); ok {
+			f.invalidate()
+		}
+	}
+
 	monitor := func() MonitorInfo {
 		for _, m := range mons {
 			if m.Index == current {
@@ -126,7 +135,7 @@ func runDesktopHelper() int {
 		mons, d = be.monitors()
 		if d != desk {
 			desk = d
-			enc.reset() // inny pulpit (np. ekran blokady) — pełna klatka
+			fullFrame() // inny pulpit (np. ekran blokady) — pełna klatka
 		}
 		info := DesktopInfo{Monitors: mons, Current: monitor().Index, Desktop: desk}
 		if n, ok := be.(noticer); ok {
@@ -135,7 +144,7 @@ func runDesktopHelper() int {
 		b, _ := json.Marshal(info)
 		if force || string(b) != lastInfo {
 			lastInfo = string(b)
-			enc.reset()
+			fullFrame()
 			_ = out.send(msgInfo, b)
 		}
 	}
@@ -168,7 +177,7 @@ func runDesktopHelper() int {
 				case "cfg":
 					if ev.Quality != "" {
 						quality = ev.Quality
-						enc.reset()
+						fullFrame()
 					}
 					if ev.Monitor != nil {
 						current = *ev.Monitor
@@ -178,7 +187,7 @@ func runDesktopHelper() int {
 						be.setCursor(*ev.Cursor)
 					}
 				case "kf":
-					enc.reset()
+					fullFrame()
 				case "clip":
 					// tekst do schowka komputera, potem Ctrl+V — wklejanie w dowolnym programie
 					if err := be.setClipboard(ev.Text); err != nil {

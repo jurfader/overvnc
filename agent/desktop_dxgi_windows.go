@@ -125,6 +125,9 @@ func (b *dxgiBackend) interval() time.Duration {
 	return dxgiFrameInterval
 }
 
+// invalidate — pełna klatka na żądanie (np. przeglądarka po ponownym połączeniu), także bez zmian na ekranie.
+func (b *dxgiBackend) invalidate() { b.force = true }
+
 func (b *dxgiBackend) setCursor(on bool) {
 	b.gdiBackend.setCursor(on)
 	b.force = true

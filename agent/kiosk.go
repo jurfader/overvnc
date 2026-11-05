@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/jpeg"
 	"io"
@@ -52,7 +53,19 @@ func runDesktopSnapshot(maxW int) int {
 			break
 		}
 	}
-	bgra, w, h, err := be.capture(mon)
+	// przechwytywanie strumieniowe (ScreenCaptureKit, DXGI) oddaje pierwszą klatkę z małym opóźnieniem
+	var bgra []byte
+	var w, h int
+	for deadline := time.Now().Add(3 * time.Second); ; {
+		bgra, w, h, err = be.capture(mon)
+		if !errors.Is(err, errNoChange) || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(40 * time.Millisecond)
+	}
+	if errors.Is(err, errNoChange) {
+		return fail("przechwytywanie: brak obrazu (brak zgody na nagrywanie ekranu?)")
+	}
 	if err != nil {
 		return fail("przechwytywanie: " + err.Error())
 	}

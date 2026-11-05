@@ -62,3 +62,39 @@ func TestMacCaptureSpeed(t *testing.T) {
 	per := time.Since(start) / n
 	t.Logf("przechwycenie %dx%d: %v na klatkę (maks. %.0f kl./s)", mons[0].W, mons[0].H, per, float64(time.Second)/float64(per))
 }
+
+// ScreenCaptureKit: strumień, pierwsza klatka, klatki tylko przy zmianach, pełna klatka na żądanie.
+func TestMacSCKStream(t *testing.T) {
+	if os.Getenv("OVERVNC_MAC_SMOKE") != "1" || loadCG() != nil || !cgPreflightScreenCaptureAccess() {
+		t.Skip("tylko ręcznie: OVERVNC_MAC_SMOKE=1 i zgoda na nagrywanie")
+	}
+	b := &macBackend{}
+	defer b.close()
+	mons, _ := b.monitors()
+	m := mons[0]
+	var frames, nochange int
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		buf, w, h, err := b.capture(m)
+		switch {
+		case err == errNoChange:
+			nochange++
+		case err != nil:
+			t.Fatal(err)
+		default:
+			frames++
+			if w != m.W || h != m.H || len(buf) != w*h*4 {
+				t.Fatalf("zły rozmiar %dx%d", w, h)
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Logf("metoda: sck=%v, klatek z obrazem: %d, bez zmian: %d", b.sck != nil, frames, nochange)
+	if b.sck == nil || frames == 0 {
+		t.Fatal("ScreenCaptureKit nie dostarczył obrazu")
+	}
+	b.invalidate()
+	if _, _, _, err := b.capture(m); err != nil {
+		t.Fatalf("pełna klatka na żądanie: %v", err)
+	}
+}
