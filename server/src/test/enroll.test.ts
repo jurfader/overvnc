@@ -29,6 +29,26 @@ test('rejestracja: token bez limitu (maxUses: null) działa wielokrotnie', async
   assert.equal((await s.app.inject({ url: '/api/agents', cookies })).json().length, 3);
 });
 
+test('rejestracja: komputer dostaje nazwę wpisaną przy tworzeniu tokenu, kolejne z numerem', async (t) => {
+  const s = await setup();
+  t.after(s.close);
+  const cookies = await s.login();
+  const { token } = (await s.app.inject({ method: 'POST', url: '/api/enroll-tokens', cookies, payload: { label: 'Kiosk Galeria', maxUses: null } })).json();
+  for (const h of ['DESKTOP-A1', 'DESKTOP-B2', 'DESKTOP-C3']) {
+    assert.equal((await s.app.inject({ method: 'POST', url: '/api/agent/enroll', payload: { token, hostname: h } })).statusCode, 200);
+  }
+  const names = ((await s.app.inject({ url: '/api/agents', cookies })).json() as { hostname: string; label: string }[])
+    .map((a) => `${a.hostname}=${a.label}`)
+    .sort();
+  assert.deepEqual(names, ['DESKTOP-A1=Kiosk Galeria', 'DESKTOP-B2=Kiosk Galeria 2', 'DESKTOP-C3=Kiosk Galeria 3']);
+
+  // token bez nazwy — zostaje nazwa systemowa
+  const { token: bare } = (await s.app.inject({ method: 'POST', url: '/api/enroll-tokens', cookies, payload: {} })).json();
+  await s.app.inject({ method: 'POST', url: '/api/agent/enroll', payload: { token: bare, hostname: 'PC-X' } });
+  const x = ((await s.app.inject({ url: '/api/agents', cookies })).json() as { hostname: string; label: string }[]).find((a) => a.hostname === 'PC-X');
+  assert.equal(x?.label, '');
+});
+
 test('rejestracja: wygasły token jest odrzucany', async (t) => {
   const s = await setup();
   t.after(s.close);

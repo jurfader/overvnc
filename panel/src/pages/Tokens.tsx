@@ -73,8 +73,8 @@ export function Tokens() {
         <CardHead icon={KeyRound} title="1. Utwórz token rejestracji" />
         <form className="form-row" onSubmit={create}>
           <label className="field">
-            Opis
-            <input className="pole" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="np. Biuro Kraków — recepcja" />
+            Nazwa komputera
+            <input className="pole" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="np. Kiosk Galeria Bałtycka" />
           </label>
           <label className="field">
             Ważny przez
@@ -97,7 +97,8 @@ export function Tokens() {
         <div style={{ marginTop: 14 }}>
           <PlacementFields clientId={clientId} siteId={siteId} allowNone={me.allClients} onChange={(c, s) => (setClientId(c), setSiteId(s))} />
           <div className="field-hint" style={{ marginTop: 6 }}>
-            Komputery zarejestrowane tym tokenem trafią od razu do wybranego klienta i lokalizacji.
+            Komputery zarejestrowane tym tokenem trafią od razu do wybranego klienta i lokalizacji i dostaną podaną nazwę (przy tokenie na kilka
+            komputerów kolejne z numerem: „… 2”, „… 3”). Bez nazwy zostanie nazwa ustawiona w systemie.
           </div>
         </div>
         <div className="callout callout-brand" style={{ marginTop: 16 }}>

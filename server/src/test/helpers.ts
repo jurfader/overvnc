@@ -39,7 +39,7 @@ export async function setup(overrides: Partial<Config> = {}) {
 
   /** Tworzy token i rejestruje agenta; zwraca jego dane uwierzytelniające. */
   const enroll = async (cookies: Record<string, string>, hostname = 'test-pc') => {
-    const t = await app.inject({ method: 'POST', url: '/api/enroll-tokens', cookies, payload: { label: 'test', maxUses: 1 } });
+    const t = await app.inject({ method: 'POST', url: '/api/enroll-tokens', cookies, payload: { label: '', maxUses: 1 } });
     const { token } = t.json();
     const res = await app.inject({ method: 'POST', url: '/api/agent/enroll', payload: { token, hostname, os: 'linux', arch: 'amd64' } });
     if (res.statusCode !== 200) throw new Error(`enroll failed: ${res.body}`);

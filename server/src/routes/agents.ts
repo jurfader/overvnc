@@ -142,6 +142,19 @@ export async function agentRoutes(app: FastifyInstance, ctx: Ctx) {
 
   // ---------- rejestracja agenta (bez sesji — uwierzytelnia token) ----------
 
+  /**
+   * Nazwa komputera w panelu = nazwa wpisana przy tworzeniu tokenu (nie nazwa z systemu).
+   * Token na kilka komputerów: kolejne dostają numer („Kiosk”, „Kiosk 2”, „Kiosk 3”…).
+   */
+  const labelFromToken = (name: string): string => {
+    if (!name || name === 'bez nazwy') return '';
+    const taken = new Set(
+      (db.prepare('SELECT label FROM agents WHERE label = ? OR label LIKE ?').all(name, `${name} %`) as { label: string }[]).map((r) => r.label),
+    );
+    if (!taken.has(name)) return name;
+    for (let n = 2; ; n++) if (!taken.has(`${name} ${n}`)) return `${name} ${n}`;
+  };
+
   app.post('/api/agent/enroll', async (req) => {
     if (!ctx.limits.enroll.hit(req.ip)) throw new HttpError(429, 'too_many_attempts', 'Zbyt wiele prób rejestracji.');
     const body = parse(EnrollBody, req.body);
@@ -157,8 +170,8 @@ export async function agentRoutes(app: FastifyInstance, ctx: Ctx) {
       const agentId = crypto.randomUUID();
       const secret = randomToken(32);
       db.prepare(
-        'INSERT INTO agents (id, secret_hash, hostname, os, arch, enrolled_at, last_ip, client_id, site_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      ).run(agentId, sha256(secret), body.hostname, body.os, body.arch, now, req.ip, t.client_id, t.site_id);
+        'INSERT INTO agents (id, secret_hash, hostname, label, os, arch, enrolled_at, last_ip, client_id, site_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      ).run(agentId, sha256(secret), body.hostname, labelFromToken(t.label), body.os, body.arch, now, req.ip, t.client_id, t.site_id);
       return { agentId, secret, tokenLabel: t.label };
     });
 
