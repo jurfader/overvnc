@@ -93,7 +93,10 @@ export function OrganizeModal({ agent, open, onClose }: { agent: Agent; open: bo
     setTagIds(agent.tags.map((t) => t.id));
     setNotes(agent.notes);
     setError('');
-  }, [open, agent]);
+    // tylko przy otwarciu: dane komputera odświeżają się na żywo (metryki co kilka sekund)
+    // i nadpisywałyby to, co ktoś właśnie wpisuje
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, agent.id]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
