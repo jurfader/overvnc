@@ -4,6 +4,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"testing"
 	"time"
 )
@@ -100,5 +101,36 @@ func TestMacAccessibilityPromptCall(t *testing.T) {
 	requestAccessibilityPrompt()
 	if !axIsProcessTrusted() {
 		t.Fatal("zgoda zniknęła po wywołaniu")
+	}
+}
+
+// Ramka wsparcia: proces desktop-overlay tworzy okna, a filtr ScreenCaptureKit je wyklucza z obrazu.
+func TestMacOverlayExcludedFromCapture(t *testing.T) {
+	exe := os.Getenv("OVERVNC_OVERLAY_EXE")
+	if os.Getenv("OVERVNC_MAC_SMOKE") != "1" || exe == "" || loadCG() != nil || !cgPreflightScreenCaptureAccess() {
+		t.Skip("tylko ręcznie: OVERVNC_MAC_SMOKE=1 OVERVNC_OVERLAY_EXE=<agent>")
+	}
+	cmd := exec.Command(exe, "desktop-overlay", "Test OVERVNC")
+	in, _ := cmd.StdinPipe()
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = in.Close(); _ = cmd.Wait() }()
+	time.Sleep(1500 * time.Millisecond)
+	b := &macBackend{}
+	defer b.close()
+	mons, _ := b.monitors()
+	for deadline := time.Now().Add(4 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		_, _, _, _ = b.capture(mons[0])
+		if b.sck != nil && b.sck.excluded != "" {
+			break
+		}
+	}
+	if b.sck == nil || b.sck.excluded == "" {
+		t.Fatal("okna ramki nie zostały wyłączone z obrazu")
+	}
+	t.Logf("wyłączone okna ramki: %s", b.sck.excluded)
+	if cmd.ProcessState != nil {
+		t.Fatal("proces ramki zakończył się przedwcześnie")
 	}
 }

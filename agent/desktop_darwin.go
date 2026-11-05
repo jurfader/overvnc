@@ -203,11 +203,7 @@ func askDesktopConsent(mode, viewer string) (bool, error) {
 	}
 	switch mode {
 	case "notify":
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if cmd, err := asConsoleUser(ctx, "/usr/bin/osascript", "-e", "display notification "+appleScriptString(who+" łączy się zdalnie z tym komputerem.")+" with title "+appleScriptString("Aktywne Wsparcie Techniczne")); err == nil {
-			_ = cmd.Run()
-		}
+		// bez powiadomienia — przez całą sesję widać ramkę „Aktywne Wsparcie Techniczne” (overlay_darwin.go)
 		return true, nil
 	case "ask":
 		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
@@ -265,6 +261,7 @@ type macBackend struct {
 	lastCursor cgPoint
 	screenOK   bool
 	lastPerm   time.Time
+	lastExcl   time.Time // ostatnie sprawdzenie okien ramki wsparcia do wyłączenia z obrazu
 }
 
 // invalidate — pełna klatka na żądanie przeglądarki, także bez zmian na ekranie.
@@ -429,6 +426,11 @@ func (b *macBackend) capture(m MonitorInfo) ([]byte, int, int, error) {
 				b.sck = nil
 				b.sckRetryAt = time.Now().Add(5 * time.Second)
 				return nil, 0, 0, errNoChange
+			}
+			// ramka wsparcia nie może trafić do podglądu operatora — sprawdzenie zaraz po starcie i co 2 s
+			if since := time.Since(b.lastExcl); since > 2*time.Second || (b.lastSeq <= 1 && since > 700*time.Millisecond) {
+				b.lastExcl = time.Now()
+				b.sck.refreshExclusions()
 			}
 			return b.captureSCK(m)
 		}

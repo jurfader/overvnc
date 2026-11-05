@@ -1,8 +1,8 @@
-//go:build !windows
+//go:build !windows && !darwin
 
 package main
 
-// startSupportOverlay — na razie tylko Windows (macOS: razem z pulpitem zdalnym, z uwzględnieniem notcha ekranu).
+// startSupportOverlay — Linux: bez ramki (brak pulpitu zdalnego).
 func startSupportOverlay(string) interface{ stop() } { return nil }
 
 func runOverlayProcess(string) int { return 0 }

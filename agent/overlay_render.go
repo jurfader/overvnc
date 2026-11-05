@@ -194,6 +194,10 @@ type notchLayout struct {
 	title, name         string
 	titleFace, nameFace font.Face
 	textX, dotX         float64
+	// top — odstęp treści od górnej krawędzi (px): MacBook z wycięciem na kamerę — napis pod nim
+	top float64
+	// black — czarne wnętrze (łączy się ze sprzętowym wycięciem MacBooka)
+	black bool
 }
 
 func cleanOverlayName(s string) string {
@@ -211,6 +215,12 @@ func cleanOverlayName(s string) string {
 }
 
 func newNotchLayout(name string, scale float64) *notchLayout {
+	return newNotchLayoutFor(name, scale, 0, 0)
+}
+
+// newNotchLayoutFor — notch co najmniej minW px szeroki, z treścią przesuniętą o top px w dół.
+// Na MacBooku z notchem nasz notch jest przedłużeniem sprzętowego wycięcia (w stylu Dynamic Island).
+func newNotchLayoutFor(name string, scale, minW, top float64) *notchLayout {
 	f := loadOverlayFonts()
 	l := &notchLayout{scale: scale, title: overlayTitle, name: cleanOverlayName(name)}
 	l.titleFace = face(f.bold, 14*scale)
@@ -224,12 +234,15 @@ func newNotchLayout(name string, scale float64) *notchLayout {
 	padX := 26 * scale
 	dot := 18 * scale // kropka + odstęp
 	content := float64(max(tw, nw)) + dot
-	l.W = int(math.Ceil(content + 2*padX + 2*shoulder))
-	l.H = int(math.Ceil(58 * scale))
+	l.W = int(math.Ceil(max(content+2*padX+2*shoulder, minW)))
+	l.top = top
+	l.black = top > 0
+	l.H = int(math.Ceil(58*scale + top))
 	if l.name == "" {
-		l.H = int(math.Ceil(42 * scale))
+		l.H = int(math.Ceil(42*scale + top))
 	}
-	l.dotX = shoulder + padX
+	// treść wyśrodkowana, gdy notch jest szerszy niż tekst (wycięcie na kamerę)
+	l.dotX = (float64(l.W) - content) / 2
 	l.textX = l.dotX + dot
 	return l
 }
@@ -274,13 +287,17 @@ func renderNotch(l *notchLayout, t, p0, p1 float64) *image.RGBA {
 	// wnętrze: ciemne, prawie nieprzezroczyste
 	z = vector.NewRasterizer(l.W, l.H)
 	notchPath(z, w, h, s, r, line)
-	z.Draw(img, img.Bounds(), image.NewUniform(color.RGBA{13, 13, 21, 246}), image.Point{})
+	fill := color.RGBA{13, 13, 21, 246}
+	if l.black {
+		fill = color.RGBA{0, 0, 0, 255}
+	}
+	z.Draw(img, img.Bounds(), image.NewUniform(fill), image.Point{})
 
 	// pulsująca kropka
 	pulse := 0.5 + 0.5*math.Sin(t*2*math.Pi/1.6)
-	cy := h / 2
+	cy := l.top + (h-l.top)/2
 	if l.name != "" {
-		cy = 22 * l.scale
+		cy = l.top + 22*l.scale
 	}
 	cx := l.dotX + 5*l.scale
 	drawDot(img, cx, cy, (5+3*pulse)*l.scale, color.RGBA{uint8(233 * 0.35 * (1 - pulse)), uint8(30 * 0.35 * (1 - pulse)), uint8(140 * 0.35 * (1 - pulse)), uint8(255 * 0.35 * (1 - pulse))})
@@ -297,7 +314,7 @@ func renderNotch(l *notchLayout, t, p0, p1 float64) *image.RGBA {
 	d.Dot = fixed.Point26_6{X: fixed.Int26_6(l.textX * 64), Y: fixed.Int26_6((cy*64 + float64(m.Ascent-m.Descent)/2))}
 	d.DrawString(l.title)
 	d2 := font.Drawer{Dst: img, Src: image.NewUniform(color.RGBA{190, 186, 214, 255}), Face: l.nameFace}
-	d2.Dot = fixed.Point26_6{X: fixed.Int26_6(l.textX * 64), Y: fixed.I(int(math.Round(41 * l.scale)))}
+	d2.Dot = fixed.Point26_6{X: fixed.Int26_6(l.textX * 64), Y: fixed.I(int(math.Round(l.top + 41*l.scale)))}
 	d2.DrawString(l.name)
 	return img
 }

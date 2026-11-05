@@ -110,10 +110,14 @@ type cmTime struct {
 
 // sckStream — strumień jednego monitora; ostatnia klatka trzymana do odczytu przez capture().
 type sckStream struct {
-	display uint32
-	w, h    int
-	stream  objc.ID
-	output  objc.ID
+	display   uint32
+	w, h      int
+	stream    objc.ID
+	output    objc.ID
+	scDisplay objc.ID
+	// okna ramki „Aktywne Wsparcie Techniczne” wyłączone z obrazu (identyfikatory okien)
+	excluded   string
+	refreshing atomic.Bool
 
 	mu    sync.Mutex
 	front []byte
@@ -180,6 +184,7 @@ func startSCK(display uint32, w, h int) (*sckStream, error) {
 	if scDisplay == 0 {
 		return nil, errors.New("monitor niedostępny dla ScreenCaptureKit")
 	}
+	scDisplay.Send(sel("retain"))
 
 	empty := objc.ID(objc.GetClass("NSArray")).Send(sel("array"))
 	filter := objc.ID(objc.GetClass("SCContentFilter")).Send(sel("alloc")).Send(sel("initWithDisplay:excludingWindows:"), scDisplay, empty)
@@ -191,7 +196,7 @@ func startSCK(display uint32, w, h int) (*sckStream, error) {
 	cfg.Send(sel("setQueueDepth:"), 3)
 	cfg.Send(sel("setMinimumFrameInterval:"), cmTime{Value: 1, Timescale: 30, Flags: 1}) // najwyżej 30 kl./s
 
-	s := &sckStream{display: display, w: w, h: h}
+	s := &sckStream{display: display, w: w, h: h, scDisplay: scDisplay}
 	s.stream = objc.ID(objc.GetClass("SCStream")).Send(sel("alloc")).Send(sel("initWithFilter:configuration:delegate:"), filter, cfg, objc.ID(0))
 	if s.stream == 0 {
 		return nil, errors.New("nie można utworzyć strumienia ekranu")
@@ -249,4 +254,70 @@ func (s *sckStream) stop() {
 	case <-done:
 	case <-time.After(3 * time.Second):
 	}
+}
+
+// refreshExclusions — okna ramki wsparcia (tytuł overlayWindowTitle) wyłączone z obrazu operatora.
+// Ramka startuje równolegle z obrazem, więc sprawdzamy okresowo; zmiana = nowy filtr strumienia.
+func (s *sckStream) refreshExclusions() {
+	if !s.refreshing.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer s.refreshing.Store(false)
+		defer func() { _ = recover() }()
+		ch := make(chan objc.ID, 1)
+		blk := objc.NewBlock(func(_ objc.Block, content objc.ID, _ objc.ID) {
+			if content != 0 {
+				content.Send(sel("retain"))
+			}
+			ch <- content
+		})
+		objc.ID(objc.GetClass("SCShareableContent")).Send(sel("getShareableContentWithCompletionHandler:"), blk)
+		var content objc.ID
+		select {
+		case content = <-ch:
+		case <-time.After(5 * time.Second):
+			return
+		}
+		if content == 0 {
+			return
+		}
+		defer content.Send(sel("release"))
+		windows := content.Send(sel("windows"))
+		list := objc.ID(objc.GetClass("NSMutableArray")).Send(sel("array"))
+		ids := ""
+		for i := range objc.Send[uint](windows, sel("count")) {
+			w := windows.Send(sel("objectAtIndex:"), i)
+			title := w.Send(sel("title"))
+			if title == 0 {
+				continue
+			}
+			p := objc.Send[*byte](title, sel("UTF8String"))
+			if p == nil || cString(p) != overlayWindowTitle {
+				continue
+			}
+			list.Send(sel("addObject:"), w)
+			ids += fmt.Sprintf("%d,", objc.Send[uint32](w, sel("windowID")))
+		}
+		if ids == s.excluded {
+			return
+		}
+		filter := objc.ID(objc.GetClass("SCContentFilter")).Send(sel("alloc")).Send(sel("initWithDisplay:excludingWindows:"), s.scDisplay, list)
+		done := make(chan struct{}, 1)
+		upd := objc.NewBlock(func(_ objc.Block, _ objc.ID) { done <- struct{}{} })
+		s.stream.Send(sel("updateContentFilter:completionHandler:"), filter, upd)
+		select {
+		case <-done:
+			s.excluded = ids
+		case <-time.After(5 * time.Second):
+		}
+	}()
+}
+
+func cString(p *byte) string {
+	n := 0
+	for *(*byte)(unsafe.Add(unsafe.Pointer(p), n)) != 0 && n < 1000 {
+		n++
+	}
+	return string(unsafe.Slice(p, n))
 }

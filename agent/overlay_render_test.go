@@ -60,6 +60,18 @@ func TestOverlayRender(t *testing.T) {
 			_ = png.Encode(f, composeOverlay(int(1280*sc), int(720*sc), "Paweł Roloff", sc, 1.3))
 			f.Close()
 		}
+		// MacBook z notchem: 3024×1964 px (skala 2), wycięcie ok. 185 pt szerokie, 32 pt wysokie
+		mac := image.NewRGBA(image.Rect(0, 0, 3024, 1964))
+		draw.Draw(mac, mac.Bounds(), composeOverlay(3024, 1964, "", 2, 1.3), image.Point{}, draw.Src)
+		hw := image.Rect(1512-185, 0, 1512+185, 64)
+		l := newNotchLayoutFor("Paweł Roloff", 2, 370+2*14*2+2*24*2, 64)
+		x0 := (3024 - l.W) / 2
+		n := renderNotch(l, 1.3, 0, 0.01)
+		draw.Draw(mac, image.Rect(x0, 0, x0+l.W, l.H), n, image.Point{}, draw.Over)
+		draw.Draw(mac, hw, image.NewUniform(color.RGBA{0, 0, 0, 255}), image.Point{}, draw.Src) // wycięcie sprzętowe
+		fm, _ := os.Create(filepath.Join(dir, "overlay-macbook-notch.png"))
+		_ = png.Encode(fm, mac.SubImage(image.Rect(900, 0, 2124, 260)))
+		fm.Close()
 		f, _ := os.Create(filepath.Join(dir, "overlay-noname.png"))
 		_ = png.Encode(f, composeOverlay(1280, 720, "", 1, 3.1))
 		f.Close()
