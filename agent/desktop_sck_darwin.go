@@ -118,6 +118,9 @@ type sckStream struct {
 	mu    sync.Mutex
 	front []byte
 	seq   uint64
+	// startErr — błąd startu zgłoszony przez system (np. odmowa); start nie blokuje: macOS może czekać
+	// na kliknięcie „Zezwól” przez użytkownika dowolnie długo
+	startErr atomic.Pointer[string]
 }
 
 func nsErrorText(e objc.ID) string {
@@ -199,19 +202,13 @@ func startSCK(display uint32, w, h int) (*sckStream, error) {
 		return nil, fmt.Errorf("strumień ekranu: %s", nsErrorText(addErr))
 	}
 	sckActive.Store(s)
-	done := make(chan objc.ID, 1)
-	startBlk := objc.NewBlock(func(_ objc.Block, e objc.ID) { done <- e })
-	s.stream.Send(sel("startCaptureWithCompletionHandler:"), startBlk)
-	select {
-	case e := <-done:
+	startBlk := objc.NewBlock(func(_ objc.Block, e objc.ID) {
 		if e != 0 {
-			sckActive.CompareAndSwap(s, nil)
-			return nil, fmt.Errorf("start przechwytywania: %s", nsErrorText(e))
+			msg := nsErrorText(e)
+			s.startErr.Store(&msg)
 		}
-	case <-time.After(10 * time.Second):
-		sckActive.CompareAndSwap(s, nil)
-		return nil, errors.New("start przechwytywania: brak odpowiedzi")
-	}
+	})
+	s.stream.Send(sel("startCaptureWithCompletionHandler:"), startBlk)
 	return s, nil
 }
 

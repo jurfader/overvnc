@@ -31,7 +31,16 @@ func TestMacDesktopSmoke(t *testing.T) {
 		t.Log("bez zgody na nagrywanie — pomijam przechwytywanie (bez okna z prośbą)")
 		return
 	}
-	buf, w, h, err := b.capture(mons[0])
+	defer b.close()
+	// strumień startuje asynchronicznie — pierwsza klatka po chwili
+	var buf []byte
+	var w, h int
+	var err error
+	for deadline := time.Now().Add(3 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		if buf, w, h, err = b.capture(mons[0]); err != errNoChange || time.Now().After(deadline) {
+			break
+		}
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,23 +53,6 @@ func TestMacDesktopSmoke(t *testing.T) {
 	if w != mons[0].W || h != mons[0].H || len(buf) != w*h*4 || sum == 0 {
 		t.Fatal("nieprawidłowy obraz")
 	}
-}
-
-func TestMacCaptureSpeed(t *testing.T) {
-	if os.Getenv("OVERVNC_MAC_SMOKE") != "1" || loadCG() != nil || !cgPreflightScreenCaptureAccess() {
-		t.Skip("tylko ręcznie: OVERVNC_MAC_SMOKE=1 i zgoda na nagrywanie")
-	}
-	b := &macBackend{}
-	mons, _ := b.monitors()
-	start := time.Now()
-	const n = 20
-	for range n {
-		if _, _, _, err := b.capture(mons[0]); err != nil {
-			t.Fatal(err)
-		}
-	}
-	per := time.Since(start) / n
-	t.Logf("przechwycenie %dx%d: %v na klatkę (maks. %.0f kl./s)", mons[0].W, mons[0].H, per, float64(time.Second)/float64(per))
 }
 
 // ScreenCaptureKit: strumień, pierwsza klatka, klatki tylko przy zmianach, pełna klatka na żądanie.
@@ -96,5 +88,17 @@ func TestMacSCKStream(t *testing.T) {
 	b.invalidate()
 	if _, _, _, err := b.capture(m); err != nil {
 		t.Fatalf("pełna klatka na żądanie: %v", err)
+	}
+}
+
+// prośba o zgodę „Dostępność” — budowanie słownika opcji przez purego/objc nie może się wysypać.
+// Gdy proces ma już zgodę, macOS nie pokazuje żadnego okna.
+func TestMacAccessibilityPromptCall(t *testing.T) {
+	if os.Getenv("OVERVNC_MAC_SMOKE") != "1" || loadCG() != nil || !axIsProcessTrusted() {
+		t.Skip("tylko ręcznie: OVERVNC_MAC_SMOKE=1, proces ze zgodą Dostępność (bez okna)")
+	}
+	requestAccessibilityPrompt()
+	if !axIsProcessTrusted() {
+		t.Fatal("zgoda zniknęła po wywołaniu")
 	}
 }

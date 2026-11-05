@@ -18,6 +18,7 @@ import (
 	"unsafe"
 
 	"github.com/ebitengine/purego"
+	"github.com/ebitengine/purego/objc"
 )
 
 // Pulpit zdalny na macOS: obraz z CoreGraphics (CGDisplayCreateImage), wejście przez CGEvent.
@@ -68,6 +69,7 @@ var (
 	cgPreflightScreenCaptureAccess func() bool
 	cgRequestScreenCaptureAccess   func() bool
 	axIsProcessTrusted             func() bool
+	axIsProcessTrustedWithOptions  func(options uintptr) bool
 )
 
 func loadCG() error {
@@ -120,6 +122,7 @@ func loadCG() error {
 		reg(&cgPreflightScreenCaptureAccess, cg, "CGPreflightScreenCaptureAccess")
 		reg(&cgRequestScreenCaptureAccess, cg, "CGRequestScreenCaptureAccess")
 		reg(&axIsProcessTrusted, as, "AXIsProcessTrusted")
+		reg(&axIsProcessTrustedWithOptions, as, "AXIsProcessTrustedWithOptions")
 	})
 	return cgErr
 }
@@ -255,7 +258,8 @@ type macBackend struct {
 	asked      bool
 	// ScreenCaptureKit (strumień) — zapasowo CoreGraphics na starszych systemach
 	sck        *sckStream
-	sckFailed  bool
+	sckFailed  bool      // ScreenCaptureKit niedostępny (macOS < 12.3) — zapasowo CoreGraphics
+	sckRetryAt time.Time // ponowny start strumienia po błędzie (bez przechodzenia na CoreGraphics)
 	lastSeq    uint64
 	force      bool
 	lastCursor cgPoint
@@ -326,7 +330,27 @@ func newDesktopBackend(_ bool) (desktopBackend, error) {
 		cgRequestScreenCaptureAccess()
 		b.asked = true
 	}
+	// bez zgody „Dostępność” sterowanie nie działa — macOS pokaże okno z przyciskiem „Otwórz Ustawienia systemowe”
+	if !axIsProcessTrusted() {
+		requestAccessibilityPrompt()
+	}
 	return b, nil
+}
+
+// requestAccessibilityPrompt — systemowa prośba o zgodę „Dostępność” (AXIsProcessTrustedWithOptions
+// z kAXTrustedCheckOptionPrompt = true). Klucz to stała CFString „AXTrustedCheckOptionPrompt”.
+func requestAccessibilityPrompt() {
+	defer func() { _ = recover() }() // brak Foundation albo zmiana API — nie przerywa sesji
+	if _, err := purego.Dlopen("/System/Library/Frameworks/Foundation.framework/Foundation", purego.RTLD_NOW|purego.RTLD_GLOBAL); err != nil {
+		return
+	}
+	name := []byte("AXTrustedCheckOptionPrompt\x00")
+	key := objc.ID(objc.GetClass("NSString")).Send(sel("stringWithUTF8String:"), &name[0])
+	val := objc.ID(objc.GetClass("NSNumber")).Send(sel("numberWithBool:"), true)
+	opts := objc.ID(objc.GetClass("NSDictionary")).Send(sel("dictionaryWithObject:forKey:"), val, key)
+	if opts != 0 {
+		axIsProcessTrustedWithOptions(uintptr(opts))
+	}
 }
 
 func (b *macBackend) notice() string {
@@ -384,15 +408,28 @@ func (b *macBackend) capture(m MonitorInfo) ([]byte, int, int, error) {
 				s.stop()
 				b.sck = nil
 			}
-			ns, err := startSCK(id, m.W, m.H)
-			if err != nil {
+			if time.Now().Before(b.sckRetryAt) {
+				return nil, 0, 0, errNoChange
+			}
+			if err := loadSCK(); err != nil {
+				// tylko brak ScreenCaptureKit przełącza na CoreGraphics — ono na nowym macOS pytałoby co klatkę
 				b.sckFailed = true
 				helperLogHook(fmt.Sprintf("przechwytywanie ekranu: ScreenCaptureKit niedostępny (%v) — CoreGraphics", err))
+			} else if ns, err := startSCK(id, m.W, m.H); err != nil {
+				b.sckRetryAt = time.Now().Add(3 * time.Second)
+				return nil, 0, 0, errNoChange
 			} else {
 				b.sck, b.lastSeq = ns, 0
 			}
 		}
 		if b.sck != nil {
+			if e := b.sck.startErr.Load(); e != nil {
+				// system odmówił (np. „Otwórz Ustawienia” zamiast „Zezwól”) — ponowna próba za chwilę
+				go b.sck.stop()
+				b.sck = nil
+				b.sckRetryAt = time.Now().Add(5 * time.Second)
+				return nil, 0, 0, errNoChange
+			}
 			return b.captureSCK(m)
 		}
 	}
