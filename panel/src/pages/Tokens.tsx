@@ -118,6 +118,10 @@ export function Tokens() {
           </p>
           <Cmd icon={Monitor} title="Windows — PowerShell jako Administrator" cmd={`$env:OVERVNC_TOKEN='${created}'; irm ${server}/install.ps1 | iex`} />
           <Cmd icon={Laptop} title="macOS / Linux — terminal" cmd={`curl -fsSL ${server}/install.sh | sudo OVERVNC_TOKEN='${created}' sh`} />
+          <p className="small muted" style={{ margin: 0 }}>
+            Na Macu instalator przeprowadzi przez jednorazowe zgody systemu (nagrywanie ekranu, sterowanie, pliki): otworzy właściwe ustawienia i Findera z plikiem agenta —
+            wystarczy przeciągnąć go na listę. Zgód nie da się nadać poleceniem (Apple na to nie pozwala); przetrwają aktualizacje agenta.
+          </p>
           <details className="manual-install">
             <summary>Ręcznie — z pobranym plikiem agenta (np. komputer bez dostępu do serwera przy instalacji)</summary>
             <div style={{ display: 'grid', gap: 12, marginTop: 12 }}>

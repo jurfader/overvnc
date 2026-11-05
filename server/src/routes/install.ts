@@ -111,6 +111,29 @@ else
   "$DEST" install --server "$SERVER" --token "$TOKEN"
 fi
 echo "Gotowe: agent OVERVNC $VER działa i uruchamia się razem z systemem. Komputer pojawi się w panelu za kilka sekund."
+
+# macOS: zgód (ekran, sterowanie, pliki) nie da się nadać poleceniem — Apple na to nie pozwala.
+# Przeprowadzamy przez nie: otwieramy właściwą sekcję Ustawień i Findera z zaznaczonym plikiem agenta.
+# Zgody są przypisane do certyfikatu agenta, więc przetrwają jego aktualizacje.
+if [ "$OS" = darwin ] && [ -n "\${SUDO_USER:-}" ] && [ "\${SUDO_USER}" != root ]; then
+  U="$SUDO_USER"
+  UIDN=$(id -u "$U")
+  as_user() { launchctl asuser "$UIDN" sudo -u "$U" "$@" >/dev/null 2>&1 || true; }
+  pane() {
+    echo ""
+    echo "→ $1: przeciągnij „overvnc-agent” z okna Findera na listę (albo + → Cmd+Shift+G → $DEST) i włącz przełącznik."
+    as_user open "x-apple.systempreferences:com.apple.preference.security?$2"
+    as_user open -R "$DEST"
+    if [ -r /dev/tty ]; then printf "   Naciśnij Enter, gdy gotowe… "; read -r _ </dev/tty || true; fi
+  }
+  echo ""
+  echo "macOS wymaga jednorazowych zgód dla agenta (Ustawienia systemowe → Prywatność i ochrona):"
+  pane "Nagrywanie ekranu i dźwięku systemowego (podgląd ekranu)" Privacy_ScreenCapture
+  pane "Dostępność (sterowanie myszą i klawiaturą)" Privacy_Accessibility
+  pane "Pełny dostęp do dysku (pliki na Biurku, w Dokumentach i Pobranych)" Privacy_AllFiles
+  echo ""
+  echo "Zgody ustawione. Jeśli którejś zabraknie, panel pokaże instrukcję przy pulpicie zdalnym."
+fi
 `;
 
 export async function installRoutes(app: FastifyInstance, ctx: Ctx) {
