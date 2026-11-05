@@ -17,8 +17,14 @@ import (
 // przy każdym połączeniu. Agent zainstalowany wcześniej jako /usr/local/bin/overvnc-agent przenosi się
 // do pakietu sam (plik w /usr/local/bin staje się dowiązaniem, usługa launchd się nie zmienia).
 
-// macAppDir — miejsce pakietu (zmienne w testach)
-var macAppDir = "/Library/Application Support/OVERVNC"
+// macAppDir — miejsce pakietu: osobny, czytelny dla wszystkich folder. NIE folder konfiguracji
+// (/Library/Application Support/OVERVNC), który jest zamknięty tylko dla roota (klucz agenta) —
+// Ustawienia systemowe nie mogłyby wtedy odczytać aplikacji przy nadawaniu zgód.
+// macLink — ścieżka uruchamiana przez usługę launchd (dowiązanie do programu w pakiecie). Zmienne w testach.
+var (
+	macAppDir = "/Library/Application Support/OVERVNC Agent"
+	macLink   = "/usr/local/bin/overvnc-agent"
+)
 
 const (
 	macAppName = "OVERVNC Agent.app"
@@ -43,37 +49,43 @@ func updateUnit(exe string) string {
 	return exe
 }
 
-// needsBundleMigration — macOS, usługa systemowa, agent jeszcze jako zwykły plik.
+// needsBundleMigration — macOS, usługa systemowa, agent jeszcze jako zwykły plik albo pakiet
+// w niewłaściwym miejscu (0.17.0 umieszczał go w zamkniętym folderze konfiguracji).
 func needsBundleMigration(exe string) bool {
-	return runtime.GOOS == "darwin" && bundleRoot(exe) == "" && os.Geteuid() == 0
+	return runtime.GOOS == "darwin" && os.Geteuid() == 0 && bundleRoot(exe) != filepath.Join(macAppDir, macAppName)
 }
 
 // installBundleUpdate pobiera zip z pakietem, rozpakowuje obok i podmienia pakiet atomowo (rename katalogu).
-// Przy przenosinach z pojedynczego pliku zwraca jego ścieżkę (do ewentualnego wycofania).
-func installBundleUpdate(ctx context.Context, cfg *Config, path string, file ManifestFile, exe, ver string) (plain string, err error) {
-	target := bundleRoot(exe)
-	if target == "" {
-		target = filepath.Join(macAppDir, macAppName)
+// Zwraca dane do ewentualnego wycofania: plain — pojedynczy plik sprzed przenosin do pakietu,
+// prevLink — poprzedni cel dowiązania (pakiet w innym miejscu).
+// relocate — usługa systemowa przenosi pakiet do macAppDir; inaczej pakiet aktualizowany jest na miejscu.
+func installBundleUpdate(ctx context.Context, cfg *Config, path string, file ManifestFile, exe, ver string, relocate bool) (plain, prevLink string, err error) {
+	target := filepath.Join(macAppDir, macAppName)
+	cur := bundleRoot(exe)
+	switch {
+	case cur == "":
 		plain = exe
+	case !relocate:
+		target = cur
 	}
 	parent := filepath.Dir(target)
 	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return "", err
+		return "", "", err
 	}
 	zipTmp := filepath.Join(parent, ".overvnc-update-"+ver+".zip")
 	defer os.Remove(zipTmp)
 	if err := downloadVerified(ctx, cfg, path, zipTmp, file); err != nil {
-		return "", err
+		return "", "", err
 	}
 	stage := filepath.Join(parent, ".overvnc-update-"+ver)
 	_ = os.RemoveAll(stage)
 	defer os.RemoveAll(stage)
 	if err := extractApp(zipTmp, stage); err != nil {
-		return "", err
+		return "", "", err
 	}
 	fresh := filepath.Join(stage, macAppName)
 	if fi, err := os.Stat(filepath.Join(fresh, macAppExe)); err != nil || fi.Mode()&0o111 == 0 {
-		return "", errors.New("pakiet aktualizacji nie zawiera programu agenta")
+		return "", "", errors.New("pakiet aktualizacji nie zawiera programu agenta")
 	}
 
 	old := target + ".old"
@@ -81,7 +93,7 @@ func installBundleUpdate(ctx context.Context, cfg *Config, path string, file Man
 	hadOld := false
 	if _, err := os.Stat(target); err == nil {
 		if err := os.Rename(target, old); err != nil {
-			return "", fmt.Errorf("nie można przenieść bieżącej wersji: %w", err)
+			return "", "", fmt.Errorf("nie można przenieść bieżącej wersji: %w", err)
 		}
 		hadOld = true
 	}
@@ -89,20 +101,39 @@ func installBundleUpdate(ctx context.Context, cfg *Config, path string, file Man
 		if hadOld {
 			_ = os.Rename(old, target)
 		}
-		return "", fmt.Errorf("nie można zainstalować nowej wersji: %w", err)
+		return "", "", fmt.Errorf("nie można zainstalować nowej wersji: %w", err)
+	}
+	if cur != "" && cur != target {
+		// pakiet w innym miejscu (0.17.0) — przestawiamy dowiązanie; stary pakiet zostaje do wycofania
+		if fi, err := os.Lstat(macLink); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			prevLink, _ = os.Readlink(macLink)
+			if err := relink(filepath.Join(target, macAppExe), macLink); err != nil {
+				return "", "", fmt.Errorf("nie można przestawić dowiązania agenta: %w", err)
+			}
+		}
 	}
 	if plain != "" {
 		// /usr/local/bin/overvnc-agent → dowiązanie do programu w pakiecie (usługa launchd uruchamia tę ścieżkę)
 		_ = os.Remove(plain + ".old")
 		if err := os.Rename(plain, plain+".old"); err != nil {
-			return "", fmt.Errorf("nie można przenieść poprzedniego pliku agenta: %w", err)
+			return "", "", fmt.Errorf("nie można przenieść poprzedniego pliku agenta: %w", err)
 		}
 		if err := os.Symlink(filepath.Join(target, macAppExe), plain); err != nil {
 			_ = os.Rename(plain+".old", plain)
-			return "", fmt.Errorf("nie można utworzyć dowiązania agenta: %w", err)
+			return "", "", fmt.Errorf("nie można utworzyć dowiązania agenta: %w", err)
 		}
 	}
-	return plain, nil
+	return plain, prevLink, nil
+}
+
+// relink — atomowa podmiana dowiązania (nowe obok, potem rename na miejsce).
+func relink(target, link string) error {
+	tmp := link + ".new"
+	_ = os.Remove(tmp)
+	if err := os.Symlink(target, tmp); err != nil {
+		return err
+	}
+	return os.Rename(tmp, link)
 }
 
 // extractApp rozpakowuje „OVERVNC Agent.app” z zipu do dst (bez wychodzenia poza katalog, bez dowiązań).

@@ -43,11 +43,13 @@ func TestBundleUpdateSwapsWholeApp(t *testing.T) {
 	})
 	serveBytes(t, data)
 	root := t.TempDir()
+	macAppDir = root
+	t.Cleanup(func() { macAppDir = "/Library/Application Support/OVERVNC Agent" })
 	app := filepath.Join(root, macAppName)
 	exe := filepath.Join(app, macAppExe)
 	_ = os.MkdirAll(filepath.Dir(exe), 0o755)
 	_ = os.WriteFile(exe, []byte("v1"), 0o755)
-	plain, err := installBundleUpdate(context.Background(), updateCfg, "/x", mf, exe, "2.0.0")
+	plain, _, err := installBundleUpdate(context.Background(), updateCfg, "/x", mf, exe, "2.0.0", false)
 	if err != nil || plain != "" {
 		t.Fatalf("aktualizacja pakietu: %v %q", err, plain)
 	}
@@ -69,10 +71,10 @@ func TestBundleMigrationFromPlainFileAndRollback(t *testing.T) {
 	data, mf := appZip(t, map[string]string{macAppName + "/Contents/MacOS/overvnc-agent": "v2"})
 	serveBytes(t, data)
 	macAppDir = t.TempDir()
-	t.Cleanup(func() { macAppDir = "/Library/Application Support/OVERVNC" })
+	t.Cleanup(func() { macAppDir = "/Library/Application Support/OVERVNC Agent" })
 	bin := filepath.Join(t.TempDir(), "overvnc-agent")
 	_ = os.WriteFile(bin, []byte("v1"), 0o755)
-	plain, err := installBundleUpdate(context.Background(), updateCfg, "/x", mf, bin, "2.0.0")
+	plain, _, err := installBundleUpdate(context.Background(), updateCfg, "/x", mf, bin, "2.0.0", true)
 	if err != nil || plain != bin {
 		t.Fatalf("przenosiny: %v %q", err, plain)
 	}
@@ -99,5 +101,36 @@ func TestExtractAppRejectsEscapes(t *testing.T) {
 		if err := extractApp(p, t.TempDir()); err == nil {
 			t.Fatalf("ścieżka %q powinna zostać odrzucona", bad)
 		}
+	}
+}
+
+// 0.17.0 umieścił pakiet w zamkniętym folderze konfiguracji — przenosiny w nowe miejsce i przestawienie dowiązania.
+func TestBundleRelocation(t *testing.T) {
+	data, mf := appZip(t, map[string]string{macAppName + "/Contents/MacOS/overvnc-agent": "v2"})
+	serveBytes(t, data)
+	oldRoot, newRoot, binDir := t.TempDir(), t.TempDir(), t.TempDir()
+	macAppDir, macLink = newRoot, filepath.Join(binDir, "overvnc-agent")
+	t.Cleanup(func() {
+		macAppDir, macLink = "/Library/Application Support/OVERVNC Agent", "/usr/local/bin/overvnc-agent"
+	})
+	oldExe := filepath.Join(oldRoot, macAppName, macAppExe)
+	_ = os.MkdirAll(filepath.Dir(oldExe), 0o755)
+	_ = os.WriteFile(oldExe, []byte("v1"), 0o755)
+	_ = os.Symlink(oldExe, macLink)
+	plain, prev, err := installBundleUpdate(context.Background(), updateCfg, "/x", mf, oldExe, "2.0.0", true)
+	if err != nil || plain != "" || prev != oldExe {
+		t.Fatalf("przenosiny pakietu: %v %q %q", err, plain, prev)
+	}
+	if b, _ := os.ReadFile(macLink); string(b) != "v2" {
+		t.Fatal("dowiązanie nie prowadzi do nowego miejsca")
+	}
+	if b, _ := os.ReadFile(oldExe); string(b) != "v1" {
+		t.Fatal("stary pakiet powinien zostać do wycofania")
+	}
+	if err := relink(prev, macLink); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(macLink); string(b) != "v1" {
+		t.Fatal("wycofanie nie przywróciło dowiązania")
 	}
 }

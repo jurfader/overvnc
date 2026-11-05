@@ -90,7 +90,8 @@ DEST=/usr/local/bin/overvnc-agent
 PLAT="$OS-$ARCH"
 # macOS: pakiet aplikacji „OVERVNC Agent.app” — system zapamiętuje dla niego zgody i decyzje „Zezwól”
 [ "$OS" = darwin ] && PLAT="$OS-$ARCH-app"
-APPDIR="/Library/Application Support/OVERVNC"
+# osobny, czytelny folder — folder konfiguracji (…/OVERVNC) jest zamknięty dla wszystkich poza rootem
+APPDIR="/Library/Application Support/OVERVNC Agent"
 APP="$APPDIR/OVERVNC Agent.app"
 TMP=$(mktemp)
 HDR=$(mktemp)
@@ -115,6 +116,7 @@ put_agent() {
     mv "$STAGE/OVERVNC Agent.app" "$APP"
     if [ -e "$DEST" ] && [ ! -L "$DEST" ]; then mv -f "$DEST" "$DEST.old"; fi
     ln -sfn "$APP/Contents/MacOS/overvnc-agent" "$DEST"
+    rm -rf "/Library/Application Support/OVERVNC/OVERVNC Agent.app" "/Library/Application Support/OVERVNC/OVERVNC Agent.app.old" # miejsce z 0.17.0
   else
     install -m 0755 "$TMP" "$DEST"
   fi

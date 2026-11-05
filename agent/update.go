@@ -130,6 +130,8 @@ type updateState struct {
 	Skip  []string `json:"skip,omitempty"` // wersje, które się nie sprawdziły — nie instalujemy ich ponownie
 	// Plain — macOS: ścieżka pojedynczego pliku agenta sprzed przenosin do pakietu .app (do wycofania)
 	Plain string `json:"plain,omitempty"`
+	// PrevLink — macOS: poprzedni cel dowiązania /usr/local/bin/overvnc-agent (pakiet w innym miejscu)
+	PrevLink string `json:"prevLink,omitempty"`
 }
 
 func statePath(cfgPath string) string {
@@ -168,6 +170,20 @@ func checkUpdateRollback(cfgPath string) {
 	st.Boots++
 	if st.Boots <= maxBootsBeforeBack {
 		saveState(cfgPath, st)
+		return
+	}
+	if st.PrevLink != "" {
+		// wycofanie przenosin pakietu w nowe miejsce — dowiązanie wraca do poprzedniego pakietu
+		if err := relink(st.PrevLink, macLink); err != nil {
+			logger.Errorf("wycofanie przenosin pakietu nie powiodło się: %v", err)
+			saveState(cfgPath, st)
+			return
+		}
+		logger.Errorf("pakiet %s %d razy nie połączył się z serwerem — przywracam poprzednie miejsce", st.To, maxBootsBeforeBack)
+		st.Skip = append(st.Skip, st.To)
+		st.To, st.Boots, st.PrevLink = "", 0, ""
+		saveState(cfgPath, st)
+		exitForRestart()
 		return
 	}
 	if st.Plain != "" {
@@ -218,7 +234,12 @@ func markUpdateHealthy(cfgPath string) {
 		return
 	}
 	logger.Infof("aktualizacja do %s zakończona powodzeniem", version)
-	st.From, st.To, st.Boots, st.Plain = "", "", 0, ""
+	// stary pakiet z poprzedniego miejsca nie jest już potrzebny
+	if old := bundleRoot(st.PrevLink); old != "" && old != filepath.Join(macAppDir, macAppName) {
+		_ = os.RemoveAll(old)
+		_ = os.RemoveAll(old + ".old")
+	}
+	st.From, st.To, st.Boots, st.Plain, st.PrevLink = "", "", 0, "", ""
 	saveState(cfgPath, st)
 	if exe, err := executablePath(); err == nil {
 		_ = os.RemoveAll(updateUnit(exe) + ".failed")
@@ -294,10 +315,10 @@ func checkForUpdate(ctx context.Context, cfg *Config, cfgPath string, pub ed2551
 		return "", fmt.Errorf("brak binarki %s w wydaniu %s", platformKey(), m.Version)
 	}
 
-	var plain string
+	var plain, prevLink string
 	if strings.HasSuffix(file.Name, ".zip") {
 		// macOS: pakiet aplikacji (podmiana całego „OVERVNC Agent.app”)
-		if plain, err = installBundleUpdate(ctx, cfg, offer.Download, file, exe, m.Version); err != nil {
+		if plain, prevLink, err = installBundleUpdate(ctx, cfg, offer.Download, file, exe, m.Version, migrate); err != nil {
 			return "", err
 		}
 	} else {
@@ -312,7 +333,7 @@ func checkForUpdate(ctx context.Context, cfg *Config, cfgPath string, pub ed2551
 		}
 	}
 	st := loadState(cfgPath)
-	st.From, st.To, st.Boots, st.Plain = version, m.Version, 0, plain
+	st.From, st.To, st.Boots, st.Plain, st.PrevLink = version, m.Version, 0, plain, prevLink
 	saveState(cfgPath, st)
 	logger.Infof("zainstalowano aktualizację %s → %s, ponowne uruchomienie", version, m.Version)
 	go func() {
