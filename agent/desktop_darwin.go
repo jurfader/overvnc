@@ -153,7 +153,8 @@ func spawnDesktopHelper(args ...string) (helperProc, error) {
 	if uid == 0 {
 		return nil, errors.New("nikt nie jest zalogowany na tym Macu (ekran logowania)")
 	}
-	exe, err := os.Executable()
+	// rzeczywista ścieżka w pakiecie „OVERVNC Agent.app” (nie dowiązanie z /usr/local/bin)
+	exe, err := executablePath()
 	if err != nil {
 		return nil, err
 	}

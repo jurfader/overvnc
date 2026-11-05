@@ -10,7 +10,7 @@ import { HttpError, parse } from '../errors.ts';
  * Token rejestracji jest przekazywany nagłówkiem (X-Enroll-Token), nie w adresie — adresy trafiają do logów.
  */
 
-const PLATFORMS = ['windows-amd64', 'windows-arm64', 'linux-amd64', 'linux-arm64', 'darwin-amd64', 'darwin-arm64'] as const;
+const PLATFORMS = ['windows-amd64', 'windows-arm64', 'linux-amd64', 'linux-arm64', 'darwin-amd64', 'darwin-arm64', 'darwin-amd64-app', 'darwin-arm64-app'] as const;
 const PlatformParams = z.object({ platform: z.enum(PLATFORMS) });
 
 /** Adres serwera z perspektywy instalowanego komputera (za proxy — z nagłówków X-Forwarded-*). */
@@ -87,19 +87,41 @@ case "$(uname -m)" in
   *) fail "nieobsługiwany procesor: $(uname -m)" ;;
 esac
 DEST=/usr/local/bin/overvnc-agent
+PLAT="$OS-$ARCH"
+# macOS: pakiet aplikacji „OVERVNC Agent.app” — system zapamiętuje dla niego zgody i decyzje „Zezwól”
+[ "$OS" = darwin ] && PLAT="$OS-$ARCH-app"
+APPDIR="/Library/Application Support/OVERVNC"
+APP="$APPDIR/OVERVNC Agent.app"
 TMP=$(mktemp)
 HDR=$(mktemp)
-trap 'rm -f "$TMP" "$HDR"' EXIT
-echo "Pobieranie agenta OVERVNC ($OS-$ARCH)..."
-curl -fsSL -H "X-Enroll-Token: $TOKEN" -D "$HDR" -o "$TMP" "$SERVER/api/install/agent/$OS-$ARCH" || fail "pobieranie nie powiodło się — token mógł wygasnąć lub zostać wykorzystany."
+STAGE=$(mktemp -d)
+trap 'rm -rf "$TMP" "$HDR" "$STAGE"' EXIT
+echo "Pobieranie agenta OVERVNC ($PLAT)..."
+curl -fsSL -H "X-Enroll-Token: $TOKEN" -D "$HDR" -o "$TMP" "$SERVER/api/install/agent/$PLAT" || fail "pobieranie nie powiodło się — token mógł wygasnąć lub zostać wykorzystany."
 WANT=$(grep -i '^x-sha256:' "$HDR" | tr -d '\\r' | awk '{print tolower($2)}')
 VER=$(grep -i '^x-agent-version:' "$HDR" | tr -d '\\r' | awk '{print $2}')
 if command -v sha256sum >/dev/null 2>&1; then GOT=$(sha256sum "$TMP" | awk '{print $1}'); else GOT=$(shasum -a 256 "$TMP" | awk '{print $1}'); fi
 [ -n "$WANT" ] && [ "$WANT" = "$GOT" ] || fail "suma kontrolna pliku się nie zgadza — przerwano."
 mkdir -p /usr/local/bin
+# put_agent — program agenta na miejscu: Linux — plik w /usr/local/bin; macOS — pakiet aplikacji
+# w „$APPDIR”, a /usr/local/bin/overvnc-agent to dowiązanie do programu w pakiecie
+put_agent() {
+  if [ "$OS" = darwin ]; then
+    ditto -x -k "$TMP" "$STAGE" || fail "nie można rozpakować pakietu agenta."
+    [ -x "$STAGE/OVERVNC Agent.app/Contents/MacOS/overvnc-agent" ] || fail "pakiet agenta jest niekompletny."
+    mkdir -p "$APPDIR"
+    rm -rf "$APP.old"
+    [ -d "$APP" ] && mv "$APP" "$APP.old"
+    mv "$STAGE/OVERVNC Agent.app" "$APP"
+    if [ -e "$DEST" ] && [ ! -L "$DEST" ]; then mv -f "$DEST" "$DEST.old"; fi
+    ln -sfn "$APP/Contents/MacOS/overvnc-agent" "$DEST"
+  else
+    install -m 0755 "$TMP" "$DEST"
+  fi
+}
 if [ -f "$CFG" ]; then
-  echo "Agent jest już zainstalowany — aktualizacja pliku i ponowne uruchomienie usługi."
-  install -m 0755 "$TMP" "$DEST"
+  echo "Agent jest już zainstalowany — aktualizacja i ponowne uruchomienie usługi."
+  put_agent
   # restart jednym poleceniem systemu — stop+start (launchctl unload/load) potrafi się „rozminąć” i usługa zostaje wyłączona
   if [ "$OS" = darwin ]; then
     launchctl kickstart -k system/overvnc-agent 2>/dev/null || launchctl load -w /Library/LaunchDaemons/overvnc-agent.plist
@@ -107,7 +129,7 @@ if [ -f "$CFG" ]; then
     systemctl restart overvnc-agent 2>/dev/null || "$DEST" start
   fi
 else
-  install -m 0755 "$TMP" "$DEST"
+  put_agent
   "$DEST" install --server "$SERVER" --token "$TOKEN"
 fi
 echo "Gotowe: agent OVERVNC $VER działa i uruchamia się razem z systemem. Komputer pojawi się w panelu za kilka sekund."
@@ -121,9 +143,9 @@ if [ "$OS" = darwin ] && [ -n "\${SUDO_USER:-}" ] && [ "\${SUDO_USER}" != root ]
   as_user() { launchctl asuser "$UIDN" sudo -u "$U" "$@" >/dev/null 2>&1 || true; }
   pane() {
     echo ""
-    echo "→ $1: przeciągnij „overvnc-agent” z okna Findera na listę (albo + → Cmd+Shift+G → $DEST) i włącz przełącznik."
+    echo "→ $1: przeciągnij „OVERVNC Agent” z okna Findera na listę (albo + → Cmd+Shift+G → $APPDIR) i włącz przełącznik."
     as_user open "x-apple.systempreferences:com.apple.preference.security?$2"
-    as_user open -R "$DEST"
+    as_user open -R "$APP"
     if [ -r /dev/tty ]; then printf "   Naciśnij Enter, gdy gotowe… "; read -r _ </dev/tty || true; fi
   }
   echo ""

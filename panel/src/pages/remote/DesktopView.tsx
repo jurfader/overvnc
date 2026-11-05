@@ -744,7 +744,7 @@ function MacPermissionNotice({ notice, onRetry }: { notice: string; onRetry: () 
       <div>
         <strong>{screen && input ? 'Mac nie pozwala jeszcze na podgląd ekranu ani sterowanie' : screen ? 'Mac nie pozwala jeszcze na podgląd ekranu — widać tylko tapetę' : 'Mac nie pozwala jeszcze na sterowanie myszą i klawiaturą'}</strong>
         <div className="small">
-          Na tym Macu: Ustawienia systemowe → Prywatność i ochrona → {panes} → przycisk <strong>+</strong> → Cmd+Shift+G → wpisz <code>/usr/local/bin/overvnc-agent</code> → Otwórz → włącz przełącznik. Zgodę daje się raz.{' '}
+          Na tym Macu: Ustawienia systemowe → Prywatność i ochrona → {panes} → przycisk <strong>+</strong> → Cmd+Shift+G → wpisz <code>/Library/Application Support/OVERVNC</code> → wybierz <strong>OVERVNC Agent</strong> → Otwórz → włącz przełącznik. Zgoda zostaje także po aktualizacjach agenta.{' '}
           <button className="link-btn notice-retry" onClick={onRetry}>
             Połącz ponownie
           </button>

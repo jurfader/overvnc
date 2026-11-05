@@ -8,6 +8,12 @@ PORT="${E2E_PORT:-18098}"
 B="http://127.0.0.1:$PORT"
 J="$WORK/cookies"
 BIN="$WORK/bin/overvnc-agent"
+OLDCOPY="$BIN.old"
+# macOS: agent działa z pakietu „OVERVNC Agent.app” i aktualizuje się całym pakietem (zip)
+if [ "$(uname -s)" = Darwin ]; then
+  BIN="$WORK/bin/OVERVNC Agent.app/Contents/MacOS/overvnc-agent"
+  OLDCOPY="$WORK/bin/OVERVNC Agent.app.old"
+fi
 PIDS=()
 cleanup() {
   touch "$WORK/stop"
@@ -27,9 +33,15 @@ PUB=$(node -e '
   fs.writeFileSync(process.argv[1], privateKey.export({ type: "pkcs8", format: "pem" }));
   console.log(publicKey.export({ type: "spki", format: "der" }).subarray(-32).toString("base64"));' "$WORK/key.pem")
 PLAT="$(cd "$ROOT/agent" && go env GOOS)-$(cd "$ROOT/agent" && go env GOARCH)"
-mkdir -p "$WORK/bin" "$WORK/rel"
+mkdir -p "$(dirname "$BIN")" "$WORK/rel"
 (cd "$ROOT/agent" && go build -ldflags "-X main.version=0.0.1 -X main.updatePublicKeyB64=$PUB" -o "$BIN" .)
 (cd "$ROOT/agent" && go build -ldflags "-X main.version=0.0.2 -X main.updatePublicKeyB64=$PUB" -o "$WORK/rel/overvnc-agent-$PLAT" .)
+if [ "$(uname -s)" = Darwin ]; then
+  A="$WORK/pkg/OVERVNC Agent.app/Contents/MacOS"
+  mkdir -p "$A"
+  cp "$WORK/rel/overvnc-agent-$PLAT" "$A/overvnc-agent"
+  (cd "$WORK/pkg" && zip -qrX "$WORK/rel/overvnc-agent-$PLAT-app.zip" "OVERVNC Agent.app")
+fi
 OVERVNC_SIGNING_KEY_FILE="$WORK/key.pem" node "$ROOT/scripts/release-manifest.mjs" "$WORK/rel" 0.0.2 >/dev/null
 
 echo "→ import wydania i start serwera"
@@ -57,7 +69,7 @@ STATUS=$(curl -sf -b "$J" -X POST "$B/api/agents/$ID/update" | json .status) || 
 for i in $(seq 150); do [ "$(curl -sf -b "$J" "$B/api/agents/$ID" | json .agentVersion)" = "0.0.2" ] && break; sleep 0.2; done
 [ "$(curl -sf -b "$J" "$B/api/agents/$ID" | json .agentVersion)" = "0.0.2" ] || fail "agent nie wrócił jako 0.0.2"
 [ "$("$BIN" version)" = "0.0.2" ] || fail "plik binarki nie został podmieniony"
-[ -f "$BIN.old" ] || fail "brak kopii poprzedniej wersji (.old)"
+[ -e "$OLDCOPY" ] || fail "brak kopii poprzedniej wersji (.old)"
 [ "$(json .to < "$WORK/update-state.json")" = "0.0.2" ] || fail "brak stanu aktualizacji"
 echo "✔ aktualizacja 0.0.1 → 0.0.2: weryfikacja podpisu, podmiana, restart, powrót online"
 [ "$(curl -sf -b "$J" "$B/api/updates" | json .outdated)" = "0" ] || fail "po aktualizacji nadal nieaktualny"

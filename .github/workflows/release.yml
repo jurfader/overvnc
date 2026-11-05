@@ -38,10 +38,10 @@ jobs:
         run: scripts/check.sh --no-e2e
       - name: Budowanie agenta
         run: scripts/build-agents.sh "${{ steps.v.outputs.version }}"
-      - name: Podpis plików macOS (stały certyfikat — zgody macOS przetrwają aktualizacje)
+      - name: Pliki macOS — podpis stałym certyfikatem i pakiety aplikacji (zgody macOS przetrwają aktualizacje)
         env:
           OVERVNC_MAC_SIGN_PEM: ${{ secrets.OVERVNC_MAC_SIGN_PEM }}
-        run: scripts/sign-macos.sh dist/agents
+        run: scripts/sign-macos.sh dist/agents "${{ steps.v.outputs.version }}"
       - name: Podpis manifestu
         env:
           OVERVNC_SIGNING_KEY: ${{ secrets.OVERVNC_SIGNING_KEY }}

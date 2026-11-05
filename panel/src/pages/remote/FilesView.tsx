@@ -318,8 +318,8 @@ export function FilesView({ agent, initialPath }: { agent: Agent; initialPath: s
             <ShieldAlert />
             <div className="small">
               <strong>macOS chroni ten folder (Biurko, Dokumenty, Pobrane i inne) także przed kontem root.</strong> Na tym Macu otwórz{' '}
-              <em>Ustawienia systemowe → Prywatność i ochrona → Pełny dostęp do dysku</em>, kliknij <strong>+</strong>, naciśnij Cmd+Shift+G i wybierz{' '}
-              <code>/usr/local/bin/overvnc-agent</code>, włącz przełącznik, a potem uruchom agenta ponownie:{' '}
+              <em>Ustawienia systemowe → Prywatność i ochrona → Pełny dostęp do dysku</em>, kliknij <strong>+</strong>, naciśnij Cmd+Shift+G, wpisz{' '}
+              <code>/Library/Application Support/OVERVNC</code> i wybierz <strong>OVERVNC Agent</strong> (starsze wersje agenta: <code>/usr/local/bin/overvnc-agent</code>), włącz przełącznik, a potem uruchom agenta ponownie:{' '}
               <code>sudo launchctl kickstart -k system/overvnc-agent</code>
             </div>
           </div>

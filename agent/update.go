@@ -59,7 +59,13 @@ type updateOffer struct {
 	Download  string `json:"download"`  // ścieżka pobrania binarki na serwerze
 }
 
-func platformKey() string { return runtime.GOOS + "-" + runtime.GOARCH }
+// platformKey — klucz pliku w manifeście; macOS: pakiet aplikacji „OVERVNC Agent.app” (zip).
+func platformKey() string {
+	if runtime.GOOS == "darwin" {
+		return runtime.GOOS + "-" + runtime.GOARCH + "-app"
+	}
+	return runtime.GOOS + "-" + runtime.GOARCH
+}
 
 // verifyManifest sprawdza podpis i zwraca manifest. Podpisane są dokładne bajty pliku manifest.json.
 func verifyManifest(raw, sig []byte, pub ed25519.PublicKey) (*Manifest, error) {
@@ -122,6 +128,8 @@ type updateState struct {
 	To    string   `json:"to,omitempty"`
 	Boots int      `json:"boots,omitempty"`
 	Skip  []string `json:"skip,omitempty"` // wersje, które się nie sprawdziły — nie instalujemy ich ponownie
+	// Plain — macOS: ścieżka pojedynczego pliku agenta sprzed przenosin do pakietu .app (do wycofania)
+	Plain string `json:"plain,omitempty"`
 }
 
 func statePath(cfgPath string) string {
@@ -162,16 +170,31 @@ func checkUpdateRollback(cfgPath string) {
 		saveState(cfgPath, st)
 		return
 	}
-	exe, err := executablePath()
+	if st.Plain != "" {
+		// wycofanie przenosin do pakietu .app — wracamy do pojedynczego pliku
+		if err := rollbackPlain(st.Plain); err != nil {
+			logger.Errorf("wycofanie przenosin do pakietu nie powiodło się: %v", err)
+			saveState(cfgPath, st)
+			return
+		}
+		logger.Errorf("pakiet %s %d razy nie połączył się z serwerem — przywracam poprzedni plik agenta", st.To, maxBootsBeforeBack)
+		st.Skip = append(st.Skip, st.To)
+		st.To, st.Boots, st.Plain = "", 0, ""
+		saveState(cfgPath, st)
+		exitForRestart()
+		return
+	}
+	exePath, err := executablePath()
 	if err != nil {
 		return
 	}
+	exe := updateUnit(exePath) // pakiet .app (macOS) albo pojedynczy plik
 	if _, err := os.Stat(exe + ".old"); err != nil {
 		logger.Errorf("wersja %s nie działa poprawnie, ale brak kopii poprzedniej wersji — nie można wycofać", st.To)
 		saveState(cfgPath, st)
 		return
 	}
-	_ = os.Remove(exe + ".failed")
+	_ = os.RemoveAll(exe + ".failed")
 	if err := os.Rename(exe, exe+".failed"); err != nil {
 		logger.Errorf("wycofanie aktualizacji nie powiodło się: %v", err)
 		return
@@ -195,10 +218,10 @@ func markUpdateHealthy(cfgPath string) {
 		return
 	}
 	logger.Infof("aktualizacja do %s zakończona powodzeniem", version)
-	st.From, st.To, st.Boots = "", "", 0
+	st.From, st.To, st.Boots, st.Plain = "", "", 0, ""
 	saveState(cfgPath, st)
 	if exe, err := executablePath(); err == nil {
-		_ = os.Remove(exe + ".failed")
+		_ = os.RemoveAll(updateUnit(exe) + ".failed")
 	}
 }
 
@@ -225,7 +248,17 @@ func checkForUpdate(ctx context.Context, cfg *Config, cfgPath string, pub ed2551
 	}
 	defer updateMu.Unlock()
 
-	q := fmt.Sprintf("/api/agent/update?version=%s&platform=%s", version, platformKey())
+	exe, err := executablePath()
+	if err != nil {
+		return "", err
+	}
+	// macOS: agent jeszcze jako zwykły plik — przenosiny do pakietu .app także w tej samej wersji
+	migrate := needsBundleMigration(exe)
+	reqVersion := version
+	if migrate {
+		reqVersion = "0.0.0"
+	}
+	q := fmt.Sprintf("/api/agent/update?version=%s&platform=%s", reqVersion, platformKey())
 	resp, err := agentRequest(ctx, cfg, q)
 	if err != nil {
 		return "", err
@@ -250,7 +283,7 @@ func checkForUpdate(ctx context.Context, cfg *Config, cfgPath string, pub ed2551
 	if err != nil {
 		return "", err
 	}
-	if m.Version != offer.Version || !newerVersion(m.Version, version) {
+	if m.Version != offer.Version || (!newerVersion(m.Version, version) && !(migrate && m.Version == version)) {
 		return "up_to_date", nil
 	}
 	if slices.Contains(loadState(cfgPath).Skip, m.Version) {
@@ -261,21 +294,25 @@ func checkForUpdate(ctx context.Context, cfg *Config, cfgPath string, pub ed2551
 		return "", fmt.Errorf("brak binarki %s w wydaniu %s", platformKey(), m.Version)
 	}
 
-	exe, err := executablePath()
-	if err != nil {
-		return "", err
-	}
-	tmp := filepath.Join(filepath.Dir(exe), ".overvnc-update-"+m.Version)
-	if err := downloadVerified(ctx, cfg, offer.Download, tmp, file); err != nil {
-		_ = os.Remove(tmp)
-		return "", err
-	}
-	if err := swapBinary(exe, tmp); err != nil {
-		_ = os.Remove(tmp)
-		return "", err
+	var plain string
+	if strings.HasSuffix(file.Name, ".zip") {
+		// macOS: pakiet aplikacji (podmiana całego „OVERVNC Agent.app”)
+		if plain, err = installBundleUpdate(ctx, cfg, offer.Download, file, exe, m.Version); err != nil {
+			return "", err
+		}
+	} else {
+		tmp := filepath.Join(filepath.Dir(exe), ".overvnc-update-"+m.Version)
+		if err := downloadVerified(ctx, cfg, offer.Download, tmp, file); err != nil {
+			_ = os.Remove(tmp)
+			return "", err
+		}
+		if err := swapBinary(exe, tmp); err != nil {
+			_ = os.Remove(tmp)
+			return "", err
+		}
 	}
 	st := loadState(cfgPath)
-	st.From, st.To, st.Boots = version, m.Version, 0
+	st.From, st.To, st.Boots, st.Plain = version, m.Version, 0, plain
 	saveState(cfgPath, st)
 	logger.Infof("zainstalowano aktualizację %s → %s, ponowne uruchomienie", version, m.Version)
 	go func() {

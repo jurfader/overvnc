@@ -21,10 +21,11 @@ const key = createPrivateKey(pem);
 
 const files = {};
 for (const name of readdirSync(dir).sort()) {
-  const m = /^overvnc-agent-(windows|darwin|linux)-(amd64|arm64)(\.exe)?$/.exec(name);
+  // pakiet aplikacji macOS: overvnc-agent-darwin-arm64-app.zip → klucz darwin-arm64-app
+  const m = /^overvnc-agent-(windows|darwin|linux)-(amd64|arm64)(?:(\.exe)|(-app)\.zip)?$/.exec(name);
   if (!m) continue;
   const data = readFileSync(path.join(dir, name));
-  files[`${m[1]}-${m[2]}`] = { name, size: statSync(path.join(dir, name)).size, sha256: createHash('sha256').update(data).digest('hex') };
+  files[`${m[1]}-${m[2]}${m[4] ?? ''}`] = { name, size: statSync(path.join(dir, name)).size, sha256: createHash('sha256').update(data).digest('hex') };
 }
 if (Object.keys(files).length === 0) {
   console.error(`Brak binarek overvnc-agent-* w ${dir}`);

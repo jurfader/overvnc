@@ -7,7 +7,8 @@ import { actorOf, agentFromRequest, requireGlobal, requireUser } from '../auth.t
 import { assertAgentAccess } from '../scope.ts';
 import { newerVersion } from '../updates.ts';
 
-const Platform = z.string().regex(/^(windows|darwin|linux)-(amd64|arm64)$/, 'Nieznana platforma.');
+// darwin-*-app — pakiet aplikacji „OVERVNC Agent.app” (zip) dla agentów od 0.17
+const Platform = z.string().regex(/^((windows|darwin|linux)-(amd64|arm64)|darwin-(amd64|arm64)-app)$/, 'Nieznana platforma.');
 const OfferQuery = z.object({ version: z.string().max(50), platform: Platform });
 const DownloadParams = z.object({ version: z.string().regex(/^[\w.-]{1,50}$/), platform: Platform });
 const PolicyBody = z.object({ policy: z.enum(['auto', 'manual']) });
