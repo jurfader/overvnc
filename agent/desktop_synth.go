@@ -81,6 +81,8 @@ type syntheticBackend struct {
 	mouseX float64
 	mouseY float64
 	color  byte
+	clip   string // schowek ekranu testowego
+	clipN  uint64
 }
 
 func newSyntheticBackend() desktopBackend { return &syntheticBackend{color: 80} }
@@ -124,6 +126,10 @@ func (s *syntheticBackend) input(ev InputEvent, m MonitorInfo) error {
 		if ev.D {
 			s.color += 40
 		}
+		// F9 na ekranie testowym = „ktoś skopiował tekst na komputerze” (test schowka -> przeglądarka)
+		if ev.D && ev.Code == "F9" {
+			s.clip, s.clipN = "skopiowane na komputerze — zażółć", s.clipN+1
+		}
 	}
 	// zdarzenia trafiają do logu agenta — testy e2e sprawdzają, że wejście dotarło
 	if ev.T != "m" {
@@ -137,6 +143,7 @@ func (s *syntheticBackend) close() {}
 // setClipboard — tryb testowy: długość tekstu trafia do logu agenta.
 func (s *syntheticBackend) setClipboard(text string) error {
 	helperLogHook(fmt.Sprintf("schowek: %d znaków", len([]rune(text))))
+	s.clip, s.clipN = text, s.clipN+1
 	return nil
 }
 
@@ -145,3 +152,8 @@ func (s *syntheticBackend) notice() string { return os.Getenv("OVERVNC_DESKTOP_T
 
 func (s *syntheticBackend) setCursor(bool)          {}
 func (s *syntheticBackend) interval() time.Duration { return 66 * time.Millisecond }
+
+func (s *syntheticBackend) clipboardSeq() uint64          { return s.clipN }
+func (s *syntheticBackend) getClipboard() (string, error) { return s.clip, nil }
+
+func (s *syntheticBackend) testScreen() bool { return true }

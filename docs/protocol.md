@@ -112,7 +112,11 @@ W `hello` agent wysyła listę obsługiwanych poleceń. Serwer odrzuca polecenie
 - `w` — kółko;
 - `k` — klawisz (`KeyboardEvent.code`);
 - `cfg` — jakość, monitor, `cursor` (kursor w obrazie), `yield` (pierwszeństwo dla osoby przy komputerze, domyślnie włączone);
-- `kf` — pełna klatka.
+- `kf` — pełna klatka;
+- `clip` — tekst do schowka komputera i Ctrl+V (wklejanie);
+- `sas` — Ctrl+Alt+Del (Windows: usługa agenta wywołuje `SendSAS` z `sas.dll`, w razie potrzeby ustawia zasadę `SoftwareSASGeneration`; zapisywane w dzienniku jako `desktop.sas`).
+
+**Schowek komputera → przeglądarka** (od 0.18.0). Po `cfg` z `clipSync: true` pomocnik co 0,7 s sprawdza numer zmiany schowka (Windows `GetClipboardSequenceNumber`, macOS `NSPasteboard.changeCount`) i po zmianie wysyła tekst jako `C` + UTF-8 (do 100 000 znaków). Wysyłane są tylko zmiany od włączenia, bez echa tekstu wklejonego z przeglądarki; w trybie podglądu serwer nie przekazuje `C`.
 
 Serwer waliduje każde zdarzenie, a w trybie podglądu odrzuca wejście.
 

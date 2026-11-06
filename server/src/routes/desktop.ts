@@ -30,12 +30,16 @@ const Event = z.discriminatedUnion('t', [
     cursor: z.boolean().optional(),
     // pierwszeństwo dla osoby przy komputerze: gdy używa myszy/klawiatury, zdalne sterowanie czeka
     yield: z.boolean().optional(),
+    // schowek komputera -> przeglądarka (zmiany od włączenia)
+    clipSync: z.boolean().optional(),
   }),
   z.object({ t: z.literal('kf') }),
   // wklejenie: tekst do schowka komputera i Ctrl+V (to też wejście — w trybie podglądu zablokowane)
   z.object({ t: z.literal('clip'), text: z.string().min(1).max(100_000) }),
+  // Ctrl+Alt+Del (Windows: wysyła usługa agenta przez SendSAS)
+  z.object({ t: z.literal('sas') }),
 ]);
-const INPUT_TYPES = new Set(['m', 'b', 'w', 'k', 'clip']);
+const INPUT_TYPES = new Set(['m', 'b', 'w', 'k', 'clip', 'sas']);
 const IDLE_MS = 60 * 60 * 1000;
 const MAX_EVENT_BYTES = 512 * 1024;
 const MAX_BUFFERED = 16 * 1024 * 1024;
@@ -110,6 +114,8 @@ export async function desktopRoutes(app: FastifyInstance, ctx: Ctx) {
             onData: (payload) => {
               bytesOut += payload.length;
               if (payload[0] === 0x46) frames++; // 'F'
+              // 'C' — tekst ze schowka komputera: tylko dla sterującego, nie w trybie podglądu
+              if (payload[0] === 0x43 && viewOnly) return;
               if (socket.bufferedAmount > MAX_BUFFERED) return end(TERM_CLOSE.overflow, 'Przeglądarka nie nadąża — sesja przerwana.');
               socket.send(payload, { binary: true });
             },
@@ -149,6 +155,7 @@ export async function desktopRoutes(app: FastifyInstance, ctx: Ctx) {
         if (INPUT_TYPES.has(ev.t)) {
           if (viewOnly) return; // tryb podglądu wymuszany na serwerze, nie tylko w panelu
           touch();
+          if (ev.t === 'sas') audit(db, actor, 'desktop.sas', id, {}, req.ip);
         }
         hub.sendChannelData(id, channel, Buffer.from(JSON.stringify(ev)));
       });

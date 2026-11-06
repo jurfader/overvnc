@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -48,8 +49,22 @@ func (d *desktopSession) toHelper(typ byte, p []byte) error {
 	return writeMsg(d.proc.stdin(), typ, p)
 }
 
-// write — zdarzenie wejścia z przeglądarki (JSON) do pomocnika.
-func (d *desktopSession) write(p []byte) error { return d.toHelper(msgEvent, p) }
+// write — zdarzenie wejścia z przeglądarki (JSON) do pomocnika. Ctrl+Alt+Del wysyła sama usługa
+// (Windows przyjmuje je tylko od usługi działającej jako SYSTEM).
+func (d *desktopSession) write(p []byte) error {
+	if len(p) < 64 && bytes.Contains(p, []byte(`"sas"`)) {
+		var ev struct {
+			T string `json:"t"`
+		}
+		if json.Unmarshal(p, &ev) == nil && ev.T == "sas" {
+			if err := sendSAS(); err != nil {
+				logger.Warningf("Ctrl+Alt+Del: %v", err)
+			}
+			return nil
+		}
+	}
+	return d.toHelper(msgEvent, p)
+}
 
 // ack — przeglądarka narysowała klatkę: pozwól pomocnikowi wysłać kolejną.
 func (d *desktopSession) ack(int) { _ = d.toHelper(msgNext, nil) }
@@ -117,7 +132,7 @@ func handleDesktopOpen(ctx context.Context, data json.RawMessage) (any, error) {
 				break
 			}
 			switch typ {
-			case msgFrame, msgInfo:
+			case msgFrame, msgInfo, msgClip:
 				// do serwera bez dzielenia na kawałki — przeglądarka dostaje całą klatkę jednym komunikatem
 				if sess.writeBinary(encodeFrame(frameData, req.Channel, append([]byte{typ}, p...))) != nil {
 					reason = "connection"

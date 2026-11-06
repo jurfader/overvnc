@@ -96,28 +96,38 @@ echo "✔ pliki: wysłanie 3,5 MB, pobranie (zgodne bajt w bajt), ZIP, edycja z 
 (cd "$ROOT/server" && SID="$SID" URL="ws://127.0.0.1:$PORT/ws/desktop/$ID" node -e '
   const { WebSocket } = require("ws");
   const ws = new WebSocket(process.env.URL, { headers: { cookie: "overvnc_sid=" + process.env.SID } });
-  let info = false, frames = 0;
-  const t = setTimeout(() => { console.error("timeout: info", info, "klatki", frames); process.exit(1); }, 15000);
+  let info = false, frames = 0, clips = [], copied = false;
+  const t = setTimeout(() => { console.error("timeout: info", info, "klatki", frames, "schowek", clips); process.exit(1); }, 15000);
   ws.on("message", (m, bin) => {
-    if (!bin) return;
+    if (!bin) { if (JSON.parse(m).type === "ready") ws.send(JSON.stringify({ t: "cfg", clipSync: true })); return; }
     const kind = String.fromCharCode(m[0]);
     if (kind === "I") info = JSON.parse(m.subarray(1)).monitors.length === 2;
+    if (kind === "C") clips.push(m.subarray(1).toString());
     if (kind === "F") {
       frames++;
       ws.send("{\"t\":\"ack\"}");
       if (frames === 3) ws.send("{\"t\":\"k\",\"code\":\"KeyQ\",\"d\":true}");
       if (frames === 4) ws.send(JSON.stringify({ t: "clip", text: "zażółć gęślą" }));
-      if (frames === 6 && info) { clearTimeout(t); ws.close(); }
+      // F9 na ekranie testowym = ktoś skopiował tekst na komputerze; potem Ctrl+Alt+Del
+      if (frames === 8 && !copied) { copied = true; ws.send(JSON.stringify({ t: "k", code: "F9", d: true })); ws.send(JSON.stringify({ t: "sas" })); }
     }
+    if (frames >= 8 && info && clips.length > 0) { clearTimeout(t); setTimeout(() => ws.close(), 300); }
   });
-  ws.on("close", () => process.exit(frames >= 6 && info ? 0 : 1));
+  ws.on("close", () => {
+    // wklejony przez nas tekst nie wraca echem — tylko to, co skopiowano na komputerze
+    const ok = frames >= 8 && info && clips.length === 1 && clips[0] === "skopiowane na komputerze — zażółć";
+    if (!ok) console.error("schowek z komputera:", JSON.stringify(clips));
+    process.exit(ok ? 0 : 1);
+  });
 ') || fail "pulpit zdalny"
 for i in $(seq 50); do grep -q "wejście k code=KeyQ" "$WORK/agent.log" && break; sleep 0.1; done
 grep -q "wejście k code=KeyQ" "$WORK/agent.log" || fail "klawisz nie dotarł do komputera"
 for i in $(seq 50); do grep -q "schowek: 12 znaków" "$WORK/agent.log" && break; sleep 0.1; done
 grep -q "schowek: 12 znaków" "$WORK/agent.log" || fail "tekst nie trafił do schowka komputera"
 grep -q "wejście k code=KeyV b=0 d=true" "$WORK/agent.log" || fail "brak Ctrl+V po wklejeniu"
-echo "✔ pulpit: monitory, klatki z potwierdzeniami (tempo), klawisz i wklejenie ze schowka dotarły do komputera"
+for i in $(seq 50); do grep -q "Ctrl+Alt+Del" "$WORK/agent.log" && break; sleep 0.1; done
+grep -q "Ctrl+Alt+Del" "$WORK/agent.log" || fail "Ctrl+Alt+Del nie dotarło do usługi agenta"
+echo "✔ pulpit: monitory, klatki z potwierdzeniami (tempo), klawisz, wklejenie, schowek komputera → przeglądarka (bez echa), Ctrl+Alt+Del"
 
 # kiosk: zrzut ekranu (osobny proces pomocnika w trybie „snapshot”) i komunikat na ekranie
 CID=$(curl -sf -b "$J" -X POST -H 'content-type: application/json' -d '{"name":"Kioski e2e","consentMode":"none"}' "$B/api/clients" | json .id) || fail "klient kiosku"

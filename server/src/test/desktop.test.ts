@@ -113,6 +113,32 @@ test('pulpit: pierwszeństwo dla osoby przy komputerze (cfg yield) i wklejanie d
   assert.equal((e.chan.data[1] as { text: string }).text, long);
 });
 
+test('pulpit: schowek komputera trafia tylko do sterującego; Ctrl+Alt+Del do agenta i do dziennika', async (t) => {
+  const e = await env();
+  t.after(() => (e.agent.close(), e.s.close()));
+  const ctl = openDesktop(e.port, e.agentId, e.c, '');
+  await until(() => ctl.text.some((m) => m.type === 'ready') && ctl.bin.length === 2);
+  e.agent.sendFrame(e.chan.id, Buffer.concat([Buffer.from('C'), Buffer.from('zażółć ze schowka')]));
+  await until(() => ctl.bin.length === 3);
+  assert.equal(ctl.bin[2].subarray(1).toString(), 'zażółć ze schowka');
+  ctl.ws.send(JSON.stringify({ t: 'sas' }));
+  await until(() => e.chan.data.some((d) => d.t === 'sas'));
+  const log = (await e.s.app.inject({ url: '/api/audit?action=desktop.sas', cookies: e.c })).json();
+  assert.ok(JSON.stringify(log).includes('desktop.sas'));
+  ctl.ws.close();
+
+  const view = openDesktop(e.port, e.agentId, e.c, '?viewOnly=1');
+  await until(() => view.text.some((m) => m.type === 'ready') && view.bin.length === 2);
+  const before = e.chan.data.length;
+  e.agent.sendFrame(e.chan.id, Buffer.concat([Buffer.from('C'), Buffer.from('tajne')]));
+  e.agent.sendFrame(e.chan.id, Buffer.concat([Buffer.from('F'), Buffer.alloc(30, 1)]));
+  await until(() => view.bin.length === 3);
+  assert.equal(String.fromCharCode(view.bin[2][0]), 'F', 'schowek nie trafia do podglądu');
+  view.ws.send(JSON.stringify({ t: 'sas' }));
+  await sleep(50);
+  assert.equal(e.chan.data.length, before, 'Ctrl+Alt+Del zablokowane w podglądzie');
+});
+
 test('pulpit: odmowa zgody przez użytkownika komputera', async (t) => {
   const e = await env();
   t.after(() => (e.agent.close(), e.s.close()));

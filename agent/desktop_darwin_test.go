@@ -180,3 +180,17 @@ func TestMacLocalInputIgnoresOwnEvents(t *testing.T) {
 		t.Fail()
 	}
 }
+
+// Schowek Maca: numer zmiany przez NSPasteboard i odczyt przez pbpaste (OVERVNC_MAC_SMOKE=1; bez zmiany schowka).
+func TestMacClipboardRead(t *testing.T) {
+	if os.Getenv("OVERVNC_MAC_SMOKE") != "1" {
+		t.Skip("tylko ręcznie: OVERVNC_MAC_SMOKE=1")
+	}
+	b := &macBackend{}
+	if b.clipboardSeq() == 0 {
+		t.Fatal("brak numeru zmiany schowka (NSPasteboard)")
+	}
+	if _, err := b.getClipboard(); err != nil {
+		t.Fatal(err)
+	}
+}

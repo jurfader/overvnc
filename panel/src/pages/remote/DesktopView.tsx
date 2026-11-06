@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ClipboardPaste, Expand, Eye, Hand, Keyboard, Lock, Maximize2, Minimize2, MonitorSmartphone, MousePointer2, Plug, RotateCcw, ShieldAlert, Shrink, ZoomOut } from 'lucide-react';
+import { ClipboardCopy, ClipboardPaste, Expand, Eye, Hand, Keyboard, Lock, Maximize2, Minimize2, MonitorSmartphone, MousePointer2, Plug, RotateCcw, ShieldAlert, Shrink, ZoomOut } from 'lucide-react';
 import type { Agent } from '../../api.ts';
 import { Badge, Button, EmptyState, toast } from '../../components.tsx';
-import { bytes } from '../../format.ts';
+import { bytes, plural } from '../../format.ts';
 import { keyForChar } from './keytext.ts';
 
 type Quality = 'low' | 'medium' | 'high';
@@ -25,6 +25,8 @@ interface DesktopInfo {
   localWatch?: boolean;
   /** osoba przy komputerze właśnie używa myszy/klawiatury — zdalne sterowanie czeka */
   local?: boolean;
+  /** można wysłać Ctrl+Alt+Del (Windows) */
+  sas?: boolean;
 }
 
 const YIELD_KEY = 'overvnc.desktop.yield';
@@ -116,6 +118,8 @@ export function DesktopView({ agent }: { agent: Agent }) {
   const [yieldLocal, setYieldLocal] = useState(storedYield);
   const yieldRef = useRef(yieldLocal);
   yieldRef.current = yieldLocal;
+  // tekst skopiowany na komputerze, którego przeglądarka nie pozwoliła wpisać do schowka bez kliknięcia
+  const [pendingClip, setPendingClip] = useState<string | null>(null);
 
   const supported = agent.online && agent.capabilities.includes('desktop.open');
   const send = (ev: object) => {
@@ -149,7 +153,8 @@ export function DesktopView({ agent }: { agent: Agent }) {
           // sterowanie myszą: kursor rysuje przeglądarka (bez opóźnienia łącza), agent go nie dorysowuje;
           // podgląd i ekrany dotykowe: kursor z komputera — widać, co robi jego użytkownik
           const localCursor = !viewOnly && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
-          ws.send(JSON.stringify({ t: 'cfg', cursor: !localCursor, yield: yieldRef.current }));
+          // schowek komputera -> Twój schowek: tylko przy sterowaniu
+          ws.send(JSON.stringify({ t: 'cfg', cursor: !localCursor, yield: yieldRef.current, clipSync: !viewOnly }));
         }
         if (m.type === 'closed') setMessage(m.message ?? '');
         return;
@@ -159,6 +164,10 @@ export function DesktopView({ agent }: { agent: Agent }) {
       const kind = String.fromCharCode(new Uint8Array(buf, 0, 1)[0]);
       if (kind === 'I') {
         setInfo(JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1))));
+        return;
+      }
+      if (kind === 'C') {
+        receiveClip(new TextDecoder().decode(new Uint8Array(buf, 1)));
         return;
       }
       if (kind !== 'F') return;
@@ -493,6 +502,28 @@ export function DesktopView({ agent }: { agent: Agent }) {
     resetInput();
   };
   /** Przycisk „Wklej”: tekst ze schowka tego komputera -> schowek zdalnego komputera + Ctrl+V. */
+  // tekst skopiowany na komputerze: od razu do Twojego schowka; Safari/Firefox wymagają kliknięcia — wtedy przycisk
+  const receiveClip = (text: string) => {
+    navigator.clipboard.writeText(text).then(
+      () => {
+        setPendingClip(null);
+        toast(`Skopiowano z komputera (${text.length} ${plural(text.length, 'znak', 'znaki', 'znaków')}) — jest w Twoim schowku`);
+      },
+      () => setPendingClip(text),
+    );
+  };
+  const copyPendingClip = () => {
+    if (pendingClip === null) return;
+    navigator.clipboard.writeText(pendingClip).then(
+      () => (setPendingClip(null), toast('Skopiowano tekst z komputera do Twojego schowka')),
+      () => toast('Przeglądarka nie pozwoliła na zapis do schowka', 'err'),
+    );
+  };
+  const sendSAS = () => {
+    send({ t: 'sas' });
+    toast('Wysłano Ctrl+Alt+Del');
+  };
+
   const pasteFromClipboard = async () => {
     try {
       const text = await navigator.clipboard.readText();
@@ -639,6 +670,16 @@ export function DesktopView({ agent }: { agent: Agent }) {
               onClick={toggleYield}
             />
           )}
+          {state === 'ready' && !viewOnly && pendingClip !== null && (
+            <Button size="sm" variant="primary" icon={ClipboardCopy} title="Na komputerze skopiowano tekst — kliknij, aby wstawić go do swojego schowka" onClick={copyPendingClip}>
+              <span className="btn-label">Kopiuj z komputera</span>
+            </Button>
+          )}
+          {state === 'ready' && !viewOnly && info?.sas && (
+            <Button size="sm" variant="ghost" className="only-desktop" title="Wyślij Ctrl+Alt+Del (ekran zabezpieczeń Windows: blokada, wylogowanie, Menedżer zadań, zmiana hasła)" onClick={sendSAS}>
+              <span className="mono small">Ctrl+Alt+Del</span>
+            </Button>
+          )}
           {state === 'ready' && !viewOnly && <Button size="sm" variant="ghost" icon={ClipboardPaste} title="Wklej tekst ze schowka (albo Ctrl+V na obrazie)" onClick={() => void pasteFromClipboard()} />}
           {zoom.s > 1 && <Button size="sm" variant="ghost" icon={ZoomOut} title="Pomniejsz (cały ekran)" onClick={() => setZoom(NO_ZOOM)} />}
           <Button size="sm" variant="ghost" icon={RotateCcw} title="Połącz ponownie" onClick={() => setSession((n) => n + 1)} />
@@ -747,6 +788,11 @@ export function DesktopView({ agent }: { agent: Agent }) {
           <button type="button" className="term-key wide" onPointerDown={(e) => e.preventDefault()} onClick={() => void pasteFromClipboard()}>
             <ClipboardPaste size={15} /> Wklej
           </button>
+          {info?.sas && (
+            <button type="button" className="term-key wide" onPointerDown={(e) => e.preventDefault()} onClick={sendSAS} title="Ekran zabezpieczeń Windows">
+              Ctrl+Alt+Del
+            </button>
+          )}
           {MOD_KEYS.map((m) => (
             <button
               key={m.key}

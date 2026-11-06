@@ -34,6 +34,7 @@ const (
 	msgNext  = 'N'
 	msgEvent = 'E'
 	msgQuit  = 'Q'
+	msgClip  = 'C' // pomocnik -> przeglądarka: tekst skopiowany na komputerze (UTF-8)
 
 	maxHelperMsg = 32 << 20
 	tileSize     = 128
@@ -86,6 +87,7 @@ type DesktopInfo struct {
 	// Local — osoba przy komputerze właśnie ich używa, więc zdalne sterowanie czeka
 	LocalWatch bool `json:"localWatch,omitempty"`
 	Local      bool `json:"local,omitempty"`
+	SAS        bool `json:"sas,omitempty"` // można wysłać Ctrl+Alt+Del (Windows)
 }
 
 // InputEvent — zdarzenie z przeglądarki. Współrzędne X/Y w zakresie 0..1 względem bieżącego monitora.
@@ -102,6 +104,8 @@ type InputEvent struct {
 	Text    string  `json:"text,omitempty"`   // clip: tekst do wklejenia (schowek komputera + Ctrl+V)
 	Monitor *int    `json:"monitor,omitempty"`
 	Yield   *bool   `json:"yield,omitempty"` // cfg: pierwszeństwo dla osoby przy komputerze (domyślnie włączone)
+	// cfg: schowek komputera -> przeglądarka (tylko sterowanie; wysyłane są zmiany od włączenia, nie stara treść)
+	ClipSync *bool `json:"clipSync,omitempty"`
 }
 
 // qualitySettings — jakość JPEG i skala (2 = połowa rozdzielczości, dla wolnych łączy).

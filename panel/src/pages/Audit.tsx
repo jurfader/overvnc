@@ -68,6 +68,7 @@ const ACTIONS: Record<string, [string, Tone]> = {
   'agent.upgrade': ['Aktualizacja agenta', 'brand'],
   'desktop.open': ['Otwarcie pulpitu zdalnego', 'warning'],
   'desktop.close': ['Zamknięcie pulpitu zdalnego', 'neutral'],
+  'desktop.sas': ['Ctrl+Alt+Del na pulpicie zdalnym', 'warning'],
 };
 
 export function Audit() {

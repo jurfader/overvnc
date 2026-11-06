@@ -30,6 +30,22 @@ type desktopBackend interface {
 // pasteModifier — klawisz wklejania razem z V (Windows: Ctrl, macOS: Cmd).
 var pasteModifier = "ControlLeft"
 
+// clipboardReader — odczyt schowka komputera (schowek -> przeglądarka). clipboardSeq zmienia się
+// przy każdej zmianie schowka i jest tani; getClipboard czyta treść (tylko tekst).
+type clipboardReader interface {
+	clipboardSeq() uint64
+	getClipboard() (string, error)
+}
+
+// isTestBackend — ekran testowy pokazuje w panelu wszystkie przyciski (np. Ctrl+Alt+Del), żeby dało się je sprawdzić.
+func isTestBackend(be desktopBackend) bool {
+	t, ok := be.(interface{ testScreen() bool })
+	return ok && t.testScreen()
+}
+
+// clipMaxRunes — najdłuższy tekst przekazywany przez schowek (w obie strony).
+const clipMaxRunes = 100_000
+
 // noticer — backend zgłasza problem do pokazania w panelu (np. brak zgody macOS na sterowanie).
 type noticer interface{ notice() string }
 
@@ -82,6 +98,13 @@ func runDesktopHelper() int {
 	defer be.close()
 	watching := startLocalInputWatch()
 	gate := newRemoteGate()
+	clipR, canClip := be.(clipboardReader)
+	var (
+		clipSync bool
+		clipSeq  uint64
+	)
+	clipTick := time.NewTicker(700 * time.Millisecond)
+	defer clipTick.Stop()
 
 	msgs := make(chan helperMsg, 1024)
 	go func() {
@@ -140,7 +163,7 @@ func runDesktopHelper() int {
 			desk = d
 			fullFrame() // inny pulpit (np. ekran blokady) — pełna klatka
 		}
-		info := DesktopInfo{Monitors: mons, Current: monitor().Index, Desktop: desk, LocalWatch: watching}
+		info := DesktopInfo{Monitors: mons, Current: monitor().Index, Desktop: desk, LocalWatch: watching, SAS: sasSupported || isTestBackend(be)}
 		if n, ok := be.(noticer); ok {
 			info.Notice = n.notice()
 		}
@@ -216,6 +239,10 @@ func runDesktopHelper() int {
 						gate.yield = *ev.Yield
 						refreshInfo(false)
 					}
+					if ev.ClipSync != nil && canClip {
+						clipSync = *ev.ClipSync
+						clipSeq = clipR.clipboardSeq() // tylko zmiany od teraz — nie to, co już leżało w schowku
+					}
 				case "kf":
 					fullFrame()
 				case "clip":
@@ -226,6 +253,9 @@ func runDesktopHelper() int {
 					if err := be.setClipboard(ev.Text); err != nil {
 						out.log("schowek: %v", err)
 						continue
+					}
+					if canClip {
+						clipSeq = clipR.clipboardSeq() // nasz własny wpis — nie odsyłamy go do przeglądarki
 					}
 					for _, k := range []InputEvent{{T: "k", Code: pasteModifier, D: true}, {T: "k", Code: "KeyV", D: true}, {T: "k", Code: "KeyV"}, {T: "k", Code: pasteModifier}} {
 						_ = be.input(k, monitor())
@@ -242,6 +272,23 @@ func runDesktopHelper() int {
 			}
 		case <-infoTick.C:
 			refreshInfo(false)
+		case <-clipTick.C:
+			if !clipSync {
+				continue
+			}
+			if s := clipR.clipboardSeq(); s != clipSeq {
+				clipSeq = s
+				text, err := clipR.getClipboard()
+				if err != nil || text == "" {
+					continue
+				}
+				if r := []rune(text); len(r) > clipMaxRunes {
+					text = string(r[:clipMaxRunes])
+				}
+				if out.send(msgClip, []byte(text)) != nil {
+					return 1
+				}
+			}
 		case <-time.After(wait):
 		}
 		if watching && gate.yield && localActive(time.Now()) != local {
