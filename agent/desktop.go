@@ -35,6 +35,8 @@ type desktopOpenReq struct {
 	Consent  string `json:"consent"` // none | notify | ask
 	Viewer   string `json:"viewer"`
 	ViewOnly bool   `json:"viewOnly"`
+	// serwery STUN/TURN dla połączenia bezpośredniego (brak = tylko droga przez serwer)
+	ICEServers []iceServer `json:"iceServers"`
 }
 
 // ---------- jedno przechwytywanie dla wszystkich oglądających ----------
@@ -89,6 +91,11 @@ type desktopViewer struct {
 
 	viewOnly bool // podgląd — nigdy nie steruje
 	seq      uint64
+
+	// połączenie bezpośrednie (WebRTC) — opcjonalne, z powrotem do drogi przez serwer
+	ice   []iceServer
+	rtcMu sync.Mutex
+	rtc   *rtcPeer
 }
 
 // presence — kto jest połączony i kto steruje; każdy oglądający dostaje własną wersję („you”).
@@ -116,7 +123,7 @@ func (g *desktopGroup) sendPresenceLocked() {
 			p.Viewers = append(p.Viewers, presenceViewer{Name: v.name, ViewOnly: v.viewOnly, Control: v.ch == g.controller, You: v == to})
 		}
 		b, _ := json.Marshal(p)
-		_ = to.sess.writeBinary(encodeFrame(frameData, to.ch, append([]byte{msgPresence}, b...)))
+		to.deliver(append([]byte{msgPresence}, b...))
 	}
 }
 
@@ -222,7 +229,7 @@ func (g *desktopGroup) join(v *desktopViewer) {
 		g.controller = v.ch // pierwszy sterujący dostaje sterowanie od razu
 	}
 	if g.info != nil {
-		_ = v.sess.writeBinary(encodeFrame(frameData, v.ch, append([]byte{msgInfo}, g.info...)))
+		v.deliver(append([]byte{msgInfo}, g.info...))
 	}
 	if len(g.viewers) > 1 {
 		_ = g.toHelper(msgEvent, []byte(`{"t":"kf"}`))
@@ -289,7 +296,7 @@ func (g *desktopGroup) broadcast(typ byte, p []byte) {
 			continue
 		}
 		// błąd zapisu = zerwane połączenie z serwerem; kanały zamknie wtedy closeAll
-		_ = v.sess.writeBinary(encodeFrame(frameData, v.ch, msg))
+		v.deliver(msg)
 	}
 }
 
@@ -330,6 +337,7 @@ func (g *desktopGroup) run() {
 	}
 	g.mu.Unlock()
 	for _, v := range viewers {
+		v.stopRTC()
 		if v.sess.channels.remove(v.ch) != nil {
 			ev := map[string]any{"channel": v.ch, "exitCode": 0}
 			if reason != "" {
@@ -346,6 +354,9 @@ func (g *desktopGroup) run() {
 // tylko od usługi działającej jako SYSTEM); ustawienia kursora i schowka są łączone dla wszystkich.
 func (v *desktopViewer) write(p []byte) error {
 	switch eventType(p) {
+	case "rtc":
+		v.handleRTC(p) // zestawienie połączenia bezpośredniego
+		return nil
 	case "take":
 		// „Przejmij sterowanie” — od razu, bez czekania na zgodę sterującego (mógł odejść od komputera)
 		if !v.viewOnly {
@@ -426,7 +437,12 @@ func (v *desktopViewer) ack(n int) {
 	g.grantLocked()
 }
 
-func (v *desktopViewer) close() { v.once.Do(func() { v.g.leave(v) }) }
+func (v *desktopViewer) close() {
+	v.once.Do(func() {
+		v.stopRTC()
+		v.g.leave(v)
+	})
+}
 
 func handleDesktopOpen(ctx context.Context, data json.RawMessage) (any, error) {
 	sess, err := sessionFrom(ctx)
@@ -466,7 +482,7 @@ func handleDesktopOpen(ctx context.Context, data json.RawMessage) (any, error) {
 	desktopGroups.mu.Unlock()
 
 	// użytkownik ma wiedzieć, że ktoś jest połączony — ramka przez całą sesję (tryby „z powiadomieniem” i „z pytaniem”)
-	v := &desktopViewer{g: g, ch: req.Channel, sess: sess, name: req.Viewer, overlay: req.Consent == "notify" || req.Consent == "ask", cursor: true, viewOnly: req.ViewOnly}
+	v := &desktopViewer{g: g, ch: req.Channel, sess: sess, name: req.Viewer, overlay: req.Consent == "notify" || req.Consent == "ask", cursor: true, viewOnly: req.ViewOnly, ice: req.ICEServers}
 	if err := sess.channels.add(req.Channel, v); err != nil {
 		if fresh {
 			g.shutdown()

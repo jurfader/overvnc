@@ -31,6 +31,12 @@ export interface Config {
   github: { repo: string; token: string } | null;
   /** Klucz publiczny wydań (base64, Ed25519) — domyślnie wbudowany; zmiana tylko przy rotacji klucza. */
   releasePublicKey: string;
+  /**
+   * Bezpośrednie połączenie z pulpitem (WebRTC). P2P=0 wyłącza. STUN_URLS — adresy publiczne
+   * (domyślnie Cloudflare), TURN_URLS + TURN_SECRET — przekaźnik coturn (hasła jednorazowe, wspólny
+   * sekret z „static-auth-secret” coturna).
+   */
+  p2p: { enabled: boolean; stun: string[]; turn: { urls: string[]; secret: string; ttlSec: number } | null };
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -51,5 +57,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     packagesDir: path.join(dataDir, 'packages'),
     github: env.GITHUB_REPO && env.GITHUB_TOKEN ? { repo: env.GITHUB_REPO, token: env.GITHUB_TOKEN } : null,
     releasePublicKey: env.RELEASE_PUBLIC_KEY ?? RELEASE_PUBLIC_KEY,
+    p2p: {
+      enabled: env.P2P !== '0',
+      stun: list(env.STUN_URLS ?? 'stun:stun.cloudflare.com:3478'),
+      turn:
+        env.TURN_URLS && env.TURN_SECRET
+          ? { urls: list(env.TURN_URLS), secret: env.TURN_SECRET, ttlSec: Number(env.TURN_TTL_HOURS ?? 12) * 3600 }
+          : null,
+    },
   };
 }
+
+const list = (v: string) =>
+  v
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);

@@ -77,6 +77,17 @@ func (h *fakeHelper) count(s string) int {
 	}
 	return n
 }
+func (h *fakeHelper) countContaining(sub string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	n := 0
+	for _, g := range h.got {
+		if strings.Contains(g, sub) {
+			n++
+		}
+	}
+	return n
+}
 func (h *fakeHelper) lastCfg() string {
 	h.mu.Lock()
 	defer h.mu.Unlock()

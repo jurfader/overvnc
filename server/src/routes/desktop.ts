@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../context.ts';
+import { iceServersFor } from '../ice.ts';
 import { audit } from '../db.ts';
 import { HttpError, parse } from '../errors.ts';
 import { userFromRequest } from '../auth.ts';
@@ -40,6 +41,23 @@ const Event = z.discriminatedUnion('t', [
   z.object({ t: z.literal('sas') }),
   // „Przejmij sterowanie” — przy kilku sterujących naraz steruje jedna osoba
   z.object({ t: z.literal('take') }),
+  // połączenie bezpośrednie (WebRTC): oferta i kandydaci ICE do agenta; stan i rodzaj drogi do dziennika
+  z.object({
+    t: z.literal('rtc'),
+    sdp: z.object({ type: z.literal('offer'), sdp: z.string().min(1).max(64_000) }).optional(),
+    cand: z
+      .object({
+        candidate: z.string().max(1024),
+        sdpMid: z.string().max(64).nullable().optional(),
+        sdpMLineIndex: z.number().int().min(0).max(255).nullable().optional(),
+        usernameFragment: z.string().max(256).nullable().optional(),
+      })
+      .optional(),
+    state: z.enum(['open', 'closed']).optional(),
+    route: z.enum(['host', 'srflx', 'prflx', 'relay']).optional(),
+  }),
+  // aktywność przy połączeniu bezpośrednim (wejście omija serwer — bez tego sesja wygasłaby po godzinie)
+  z.object({ t: z.literal('act') }),
 ]);
 const INPUT_TYPES = new Set(['m', 'b', 'w', 'k', 'clip', 'sas', 'take']);
 const IDLE_MS = 60 * 60 * 1000;
@@ -81,6 +99,10 @@ export async function desktopRoutes(app: FastifyInstance, ctx: Ctx) {
       let bytesOut = 0;
       let ended = false;
       let idleTimer: NodeJS.Timeout;
+      // droga obrazu do dziennika: server | p2p (bezpośrednio) | p2p-turn (przez przekaźnik coturn)
+      let transport = 'server';
+      let p2pUsed: string | null = null;
+      const ice = iceServersFor(ctx.config, `u${user.id}`);
 
       // tryb zgody wynika z klienta komputera (ustawiany w panelu: Klienci)
       const consent =
@@ -111,7 +133,7 @@ export async function desktopRoutes(app: FastifyInstance, ctx: Ctx) {
         .openChannel(
           id,
           'desktop.open',
-          { quality: q.quality, monitor: q.monitor, consent, viewer: user.displayName || user.username, viewOnly },
+          { quality: q.quality, monitor: q.monitor, consent, viewer: user.displayName || user.username, viewOnly, iceServers: ice },
           {
             onData: (payload) => {
               bytesOut += payload.length;
@@ -132,7 +154,7 @@ export async function desktopRoutes(app: FastifyInstance, ctx: Ctx) {
           if (ended || socket.readyState !== socket.OPEN) return hub.closeChannel(id, ch);
           channel = ch;
           audit(db, actor, 'desktop.open', id, { viewOnly, consent, quality: q.quality }, req.ip);
-          socket.send(JSON.stringify({ type: 'ready', viewOnly }));
+          socket.send(JSON.stringify({ type: 'ready', viewOnly, p2p: ctx.config.p2p.enabled, iceServers: ice }));
         })
         .catch((err: Error & { code?: string }) =>
           end(TERM_CLOSE.failed, err.code === 'consent_denied' ? 'Użytkownik komputera nie zgodził się na połączenie.' : err.message || 'Nie udało się otworzyć pulpitu.'),
@@ -154,6 +176,16 @@ export async function desktopRoutes(app: FastifyInstance, ctx: Ctx) {
           hub.sendAck(id, channel, 1);
           return;
         }
+        if (ev.t === 'act') {
+          if (!viewOnly) touch();
+          return;
+        }
+        if (ev.t === 'rtc') {
+          if (!ctx.config.p2p.enabled) return;
+          if (ev.state === 'open') p2pUsed = transport = ev.route === 'relay' ? 'p2p-turn' : 'p2p';
+          if (ev.state === 'closed') transport = 'server';
+          if (ev.state) return; // tylko dla dziennika
+        }
         if (INPUT_TYPES.has(ev.t)) {
           if (viewOnly) return; // tryb podglądu wymuszany na serwerze, nie tylko w panelu
           touch();
@@ -172,7 +204,7 @@ export async function desktopRoutes(app: FastifyInstance, ctx: Ctx) {
         clearTimeout(idleTimer);
         clearInterval(keepAlive);
         if (channel !== null) hub.closeChannel(id, channel);
-        audit(db, actor, 'desktop.close', id, { seconds: Math.round((Date.now() - started) / 1000), frames, bytesOut, viewOnly, reason }, req.ip);
+        audit(db, actor, 'desktop.close', id, { seconds: Math.round((Date.now() - started) / 1000), frames, bytesOut, viewOnly, reason, transport: p2pUsed ?? transport }, req.ip);
         if (reason && socket.readyState === socket.OPEN) socket.close(1001, 'Serwer jest restartowany.');
       };
       sessions.add(finish);

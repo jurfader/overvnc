@@ -35,6 +35,8 @@ interface Presence {
 }
 
 const YIELD_KEY = 'overvnc.desktop.yield';
+/** zdarzenia wysyłane kanałem bezpośrednim (gdy jest); reszta zawsze przez serwer */
+const FAST_EVENTS = new Set(['m', 'b', 'w', 'k']);
 function storedYield(): boolean {
   try {
     return localStorage.getItem(YIELD_KEY) !== '0';
@@ -129,8 +131,19 @@ export function DesktopView({ agent }: { agent: Agent }) {
   const [presence, setPresence] = useState<Presence | null>(null);
   const hadControl = useRef<boolean | null>(null);
 
+  // połączenie bezpośrednie (WebRTC): kanał danych z komputerem; null = obraz i wejście przez serwer
+  const dcRef = useRef<RTCDataChannel | null>(null);
+  const lastInput = useRef(0);
+  const [route, setRoute] = useState<'direct' | 'turn' | null>(null);
+
   const supported = agent.online && agent.capabilities.includes('desktop.open');
-  const send = (ev: object) => {
+  const send = (ev: { t: string; [k: string]: unknown }) => {
+    // częste zdarzenia kanałem bezpośrednim; rzadkie akcje zawsze przez serwer (sprawdzanie, dziennik)
+    const dc = dcRef.current;
+    if (FAST_EVENTS.has(ev.t)) {
+      lastInput.current = Date.now();
+      if (dc?.readyState === 'open') return dc.send(JSON.stringify(ev));
+    }
     if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify(ev));
   };
 
@@ -145,6 +158,8 @@ export function DesktopView({ agent }: { agent: Agent }) {
     setPresence(null);
     hadControl.current = null;
     setMessage('');
+    setRoute(null);
+    dcRef.current = null;
     let queue = Promise.resolve();
     let frames = 0;
     let bytesIn = 0;
@@ -153,10 +168,102 @@ export function DesktopView({ agent }: { agent: Agent }) {
       frames = 0;
       bytesIn = 0;
     }, 1000);
+    const wsSend = (ev: object) => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(ev));
+    // potwierdzenie klatki tą drogą, którą płyną klatki
+    const ack = () => {
+      const dc = dcRef.current;
+      if (dc?.readyState === 'open') dc.send('{"t":"ack"}');
+      else if (ws.readyState === WebSocket.OPEN) ws.send('{"t":"ack"}');
+    };
+    // przy połączeniu bezpośrednim wejście omija serwer — dajemy mu znać, że sesja jest używana
+    const activityTimer = window.setInterval(() => {
+      if (dcRef.current && Date.now() - lastInput.current < 60_000) wsSend({ t: 'act' });
+    }, 60_000);
+
+    // ---------- połączenie bezpośrednie (WebRTC) ----------
+    let pc: RTCPeerConnection | null = null;
+    const pendingCands: RTCIceCandidateInit[] = [];
+    const startP2P = async (iceServers: RTCIceServer[]) => {
+      if (typeof RTCPeerConnection === 'undefined' || localStorage.getItem('overvnc.desktop.p2p') === '0') return;
+      try {
+        const conn = new RTCPeerConnection({ iceServers });
+        pc = conn;
+        const dc = conn.createDataChannel('desk', { ordered: true });
+        dc.binaryType = 'arraybuffer';
+        let parts: Uint8Array[] = [];
+        let size = 0;
+        dc.onmessage = (e) => {
+          // [1 = koniec | 0 = ciąg dalszy][kawałek wiadomości]
+          const chunk = new Uint8Array(e.data as ArrayBuffer);
+          parts.push(chunk.subarray(1));
+          size += chunk.length - 1;
+          if (chunk[0] !== 1) return;
+          const whole = new Uint8Array(size);
+          let off = 0;
+          for (const p of parts) {
+            whole.set(p, off);
+            off += p.length;
+          }
+          parts = [];
+          size = 0;
+          handleBinary(whole.buffer);
+        };
+        dc.onopen = async () => {
+          if (pc !== conn) return;
+          dcRef.current = dc;
+          let r: 'direct' | 'turn' = 'direct';
+          let kind = 'host';
+          try {
+            const stats = await conn.getStats();
+            let pairId = '';
+            stats.forEach((s) => s.type === 'transport' && s.selectedCandidatePairId && (pairId = s.selectedCandidatePairId));
+            const pair = pairId ? stats.get(pairId) : [...stats.values()].find((s) => s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded');
+            const local = pair && stats.get(pair.localCandidateId);
+            const remote = pair && stats.get(pair.remoteCandidateId);
+            kind = local?.candidateType ?? 'host';
+            if (local?.candidateType === 'relay' || remote?.candidateType === 'relay') (r = 'turn'), (kind = 'relay');
+          } catch {
+            /* bez statystyk — zakładamy połączenie bezpośrednie */
+          }
+          setRoute(r);
+          wsSend({ t: 'rtc', state: 'open', route: kind });
+        };
+        dc.onclose = () => {
+          if (dcRef.current !== dc) return;
+          dcRef.current = null;
+          setRoute(null);
+          wsSend({ t: 'rtc', state: 'closed' });
+        };
+        conn.onicecandidate = (e) => e.candidate && wsSend({ t: 'rtc', cand: e.candidate.toJSON() });
+        conn.onconnectionstatechange = () => conn.connectionState === 'failed' && conn.close();
+        const offer = await conn.createOffer();
+        await conn.setLocalDescription(offer);
+        wsSend({ t: 'rtc', sdp: { type: 'offer', sdp: offer.sdp } });
+      } catch {
+        pc = null; // brak WebRTC — zostaje droga przez serwer
+      }
+    };
+    const onSignal = async (s: { sdp?: RTCSessionDescriptionInit; cand?: RTCIceCandidateInit }) => {
+      const conn = pc;
+      if (!conn) return;
+      try {
+        if (s.sdp) {
+          await conn.setRemoteDescription(s.sdp);
+          for (const c of pendingCands.splice(0)) await conn.addIceCandidate(c);
+        }
+        // kandydaci komputera mogą przyjść przed odpowiedzią
+        if (s.cand) {
+          if (conn.remoteDescription) await conn.addIceCandidate(s.cand);
+          else pendingCands.push(s.cand);
+        }
+      } catch {
+        /* nieudane połączenie bezpośrednie — obraz dalej przez serwer */
+      }
+    };
 
     ws.onmessage = (ev) => {
       if (typeof ev.data === 'string') {
-        const m = JSON.parse(ev.data) as { type: string; consent?: string; message?: string };
+        const m = JSON.parse(ev.data) as { type: string; consent?: string; message?: string; p2p?: boolean; iceServers?: RTCIceServer[] };
         if (m.type === 'connecting' && m.consent === 'ask') setState('consent');
         if (m.type === 'ready') {
           setState('ready');
@@ -165,13 +272,21 @@ export function DesktopView({ agent }: { agent: Agent }) {
           const localCursor = !viewOnly && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
           // schowek komputera -> Twój schowek: tylko przy sterowaniu
           ws.send(JSON.stringify({ t: 'cfg', cursor: !localCursor, yield: yieldRef.current, clipSync: !viewOnly }));
+          if (m.p2p) void startP2P(m.iceServers ?? []);
         }
         if (m.type === 'closed') setMessage(m.message ?? '');
         return;
       }
-      const buf = ev.data as ArrayBuffer;
+      handleBinary(ev.data as ArrayBuffer);
+    };
+    // wiadomość od komputera — przez serwer albo kanałem bezpośrednim
+    const handleBinary = (buf: ArrayBuffer) => {
       bytesIn += buf.byteLength;
       const kind = String.fromCharCode(new Uint8Array(buf, 0, 1)[0]);
+      if (kind === 'R') {
+        void onSignal(JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1))));
+        return;
+      }
       if (kind === 'I') {
         setInfo(JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1))));
         return;
@@ -201,15 +316,23 @@ export function DesktopView({ agent }: { agent: Agent }) {
           bm.close();
         });
         frames++;
-        if (ws.readyState === WebSocket.OPEN) ws.send('{"t":"ack"}');
+        ack();
       });
     };
     ws.onclose = () => {
       setState('closed');
       wsRef.current = null;
+      dcRef.current = null;
+      pc?.close();
+      pc = null;
+      setRoute(null);
     };
     return () => {
       window.clearInterval(statTimer);
+      window.clearInterval(activityTimer);
+      dcRef.current = null;
+      pc?.close();
+      pc = null;
       ws.close();
     };
     // jakość i monitor zmieniamy w locie (cfg); nowe połączenie tylko przy zmianie trybu podglądu / „Połącz ponownie”
@@ -659,6 +782,19 @@ export function DesktopView({ agent }: { agent: Agent }) {
         {state === 'ready' && (
           <span className="small muted mono">
             {stats.fps} kl./s · {bytes(stats.bps)}/s
+            <span
+              className={`desk-route ${route ? 'on' : ''}`}
+              title={
+                route === 'direct'
+                  ? 'Połączenie bezpośrednie z komputerem (WebRTC) — obraz nie idzie przez serwer'
+                  : route === 'turn'
+                    ? 'Połączenie przez przekaźnik TURN na serwerze OVERVNC (sieci nie pozwoliły na bezpośrednie)'
+                    : 'Obraz przez serwer OVERVNC'
+              }
+            >
+              {' · '}
+              {route === 'direct' ? 'bezpośrednio' : route === 'turn' ? 'przez TURN' : 'przez serwer'}
+            </span>
           </span>
         )}
         <div className="toolbar" style={{ marginLeft: 'auto' }}>

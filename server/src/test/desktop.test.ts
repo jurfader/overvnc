@@ -141,6 +141,38 @@ test('pulpit: schowek komputera trafia tylko do sterującego; Ctrl+Alt+Del do ag
   assert.equal(e.chan.data.length, before, 'Ctrl+Alt+Del zablokowane w podglądzie');
 });
 
+test('pulpit: połączenie bezpośrednie — serwery ICE dla obu stron, sygnalizacja do agenta, droga w dzienniku', async (t) => {
+  const e = await env();
+  t.after(() => (e.agent.close(), e.s.close()));
+  const d = openDesktop(e.port, e.agentId, e.c, '');
+  await until(() => d.text.some((m) => m.type === 'ready'));
+  const ready = d.text.find((m) => m.type === 'ready');
+  assert.equal(ready.p2p, true);
+  assert.deepEqual(ready.iceServers, [{ urls: ['stun:stun.cloudflare.com:3478'] }]);
+  assert.deepEqual(e.chan.open.iceServers, ready.iceServers, 'agent dostaje te same serwery');
+
+  d.ws.send(JSON.stringify({ t: 'rtc', sdp: { type: 'offer', sdp: 'v=0' } }));
+  d.ws.send(JSON.stringify({ t: 'rtc', cand: { candidate: 'candidate:1 1 udp 1 192.168.1.5 5000 typ host', sdpMid: '0', sdpMLineIndex: 0 } }));
+  d.ws.send(JSON.stringify({ t: 'rtc', sdp: { type: 'answer', sdp: 'v=0' } })); // tylko oferta — odrzucone
+  d.ws.send(JSON.stringify({ t: 'rtc', state: 'open', route: 'host' })); // tylko do dziennika
+  d.ws.send(JSON.stringify({ t: 'act' }));
+  await until(() => e.chan.data.length === 2);
+  await sleep(50);
+  assert.equal(e.chan.data.length, 2);
+  assert.equal(e.chan.data[0].sdp.type, 'offer');
+  assert.ok(e.chan.data[1].cand.candidate.includes('typ host'));
+
+  // odpowiedź agenta ('R') trafia do przeglądarki
+  e.agent.sendFrame(e.chan.id, Buffer.concat([Buffer.from('R'), Buffer.from('{"t":"answer"}')]));
+  await until(() => d.bin.some((b) => b[0] === 0x52));
+
+  d.ws.close();
+  await until(() => {
+    const row = e.s.db.prepare("SELECT details FROM audit_log WHERE action = 'desktop.close'").get() as { details: string } | undefined;
+    return !!row && JSON.parse(row.details).transport === 'p2p';
+  });
+});
+
 test('pulpit: odmowa zgody przez użytkownika komputera', async (t) => {
   const e = await env();
   t.after(() => (e.agent.close(), e.s.close()));

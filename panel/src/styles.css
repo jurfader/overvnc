@@ -952,6 +952,8 @@ textarea.pole.editor-area { font: 12.5px/1.55 var(--font-mono); height: 58vh; mi
 /* steruje ktoś inny — plakietka z przyciskiem (klikalna) */
 .desktop-take { pointer-events: auto; color: rgb(var(--ink)); border-color: rgb(var(--primary) / 0.35); padding: 4px 4px 4px 12px; }
 .desktop-take .btn { flex-shrink: 0; }
+/* droga obrazu: bezpośrednio (WebRTC) / przez TURN / przez serwer */
+.desk-route.on { color: rgb(var(--success)); }
 /* inne osoby połączone z tym pulpitem */
 .desk-viewers { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgb(var(--ink-2)); }
 .desk-viewers svg { width: 14px; height: 14px; flex-shrink: 0; }
