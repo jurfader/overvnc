@@ -223,7 +223,10 @@ func TestDesktopGroupOverlayNames(t *testing.T) {
 	var overlays []string
 	stopped := 0
 	spawnHelperFn = func(...string) (helperProc, error) { return newFakeHelper(), nil }
-	overlayFn = func(name string) interface{ stop() } { overlays = append(overlays, name); return stopFn(func() { stopped++ }) }
+	overlayFn = func(name string) interface{ stop() } {
+		overlays = append(overlays, name)
+		return stopFn(func() { stopped++ })
+	}
 	t.Cleanup(func() { spawnHelperFn, overlayFn = spawnDesktopHelper, startSupportOverlay })
 
 	srv := newFakeServer()
