@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ClipboardPaste, Expand, Eye, Keyboard, Lock, Maximize2, Minimize2, MonitorSmartphone, MousePointer2, Plug, RotateCcw, ShieldAlert, Shrink, ZoomOut } from 'lucide-react';
+import { ClipboardPaste, Expand, Eye, Hand, Keyboard, Lock, Maximize2, Minimize2, MonitorSmartphone, MousePointer2, Plug, RotateCcw, ShieldAlert, Shrink, ZoomOut } from 'lucide-react';
 import type { Agent } from '../../api.ts';
 import { Badge, Button, EmptyState, toast } from '../../components.tsx';
 import { bytes } from '../../format.ts';
@@ -21,6 +21,19 @@ interface DesktopInfo {
   desktop?: string;
   /** macOS: brakująca zgoda systemu — "screen" (nagrywanie ekranu), "input" (Dostępność) */
   notice?: string;
+  /** agent rozpoznaje fizyczną mysz/klawiaturę (pierwszeństwo dla osoby przy komputerze) */
+  localWatch?: boolean;
+  /** osoba przy komputerze właśnie używa myszy/klawiatury — zdalne sterowanie czeka */
+  local?: boolean;
+}
+
+const YIELD_KEY = 'overvnc.desktop.yield';
+function storedYield(): boolean {
+  try {
+    return localStorage.getItem(YIELD_KEY) !== '0';
+  } catch {
+    return true;
+  }
 }
 
 const QUALITY_LABELS: Record<Quality, string> = { low: 'Niska (szybka)', medium: 'Średnia', high: 'Wysoka' };
@@ -99,6 +112,10 @@ export function DesktopView({ agent }: { agent: Agent }) {
   const [session, setSession] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
   const [stats, setStats] = useState({ fps: 0, bps: 0 });
+  // pierwszeństwo dla osoby przy komputerze: gdy rusza myszą lub pisze, zdalne sterowanie czeka
+  const [yieldLocal, setYieldLocal] = useState(storedYield);
+  const yieldRef = useRef(yieldLocal);
+  yieldRef.current = yieldLocal;
 
   const supported = agent.online && agent.capabilities.includes('desktop.open');
   const send = (ev: object) => {
@@ -132,7 +149,7 @@ export function DesktopView({ agent }: { agent: Agent }) {
           // sterowanie myszą: kursor rysuje przeglądarka (bez opóźnienia łącza), agent go nie dorysowuje;
           // podgląd i ekrany dotykowe: kursor z komputera — widać, co robi jego użytkownik
           const localCursor = !viewOnly && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
-          ws.send(JSON.stringify({ t: 'cfg', cursor: !localCursor }));
+          ws.send(JSON.stringify({ t: 'cfg', cursor: !localCursor, yield: yieldRef.current }));
         }
         if (m.type === 'closed') setMessage(m.message ?? '');
         return;
@@ -540,6 +557,17 @@ export function DesktopView({ agent }: { agent: Agent }) {
     );
 
   const secure = info?.desktop && info.desktop.toLowerCase() !== 'default';
+  const toggleYield = () => {
+    const next = !yieldLocal;
+    setYieldLocal(next);
+    try {
+      localStorage.setItem(YIELD_KEY, next ? '1' : '0');
+    } catch {
+      /* tryb prywatny — ustawienie tylko na tę sesję */
+    }
+    send({ t: 'cfg', yield: next });
+    toast(next ? 'Pierwszeństwo dla osoby przy komputerze: gdy używa myszy lub klawiatury, Twoje sterowanie czeka' : 'Sterujesz także wtedy, gdy ktoś przy komputerze używa myszy lub klawiatury');
+  };
   return (
     <div ref={wrap} className={`desktop-wrap glass-card anim-rise ${fullscreen || cssFull ? 'fullscreen' : ''} ${cssFull ? 'fullscreen-css' : ''} ${fillWindow && !fullscreen && !cssFull ? 'fill-window' : ''}`}>
       <div className="term-bar">
@@ -596,6 +624,21 @@ export function DesktopView({ agent }: { agent: Agent }) {
           <Button size="sm" variant={viewOnly ? 'outline' : 'ghost'} icon={viewOnly ? Eye : MousePointer2} onClick={() => setViewOnly((v) => !v)} title="Przełącz podgląd / sterowanie">
             <span className="btn-label">{viewOnly ? 'Podgląd' : 'Sterowanie'}</span>
           </Button>
+          {state === 'ready' && !viewOnly && info?.localWatch && (
+            <Button
+              size="sm"
+              variant={yieldLocal ? 'ghost' : 'outline'}
+              icon={Hand}
+              className={yieldLocal ? '' : 'yield-off'}
+              aria-pressed={yieldLocal}
+              title={
+                yieldLocal
+                  ? 'Pierwszeństwo dla osoby przy komputerze: włączone — gdy używa myszy lub klawiatury, Twoje sterowanie czeka. Kliknij, aby wyłączyć.'
+                  : 'Pierwszeństwo dla osoby przy komputerze: wyłączone — sterujesz zawsze. Kliknij, aby włączyć.'
+              }
+              onClick={toggleYield}
+            />
+          )}
           {state === 'ready' && !viewOnly && <Button size="sm" variant="ghost" icon={ClipboardPaste} title="Wklej tekst ze schowka (albo Ctrl+V na obrazie)" onClick={() => void pasteFromClipboard()} />}
           {zoom.s > 1 && <Button size="sm" variant="ghost" icon={ZoomOut} title="Pomniejsz (cały ekran)" onClick={() => setZoom(NO_ZOOM)} />}
           <Button size="sm" variant="ghost" icon={RotateCcw} title="Połącz ponownie" onClick={() => setSession((n) => n + 1)} />
@@ -614,6 +657,12 @@ export function DesktopView({ agent }: { agent: Agent }) {
       </div>
       {info?.notice && <MacPermissionNotice notice={info.notice} onRetry={() => setSession((n) => n + 1)} />}
       <div className="desktop-stage" ref={stage}>
+        {/* nad obrazem, nie w pasku narzędzi — pojawia się i znika co chwilę, nie może przesuwać układu */}
+        {state === 'ready' && !viewOnly && info?.local && (
+          <div className="desktop-local" role="status">
+            <Hand /> Ktoś przy komputerze — sterowanie czeka
+          </div>
+        )}
         <div className="desktop-zoom" style={zoom.s > 1 ? { transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.s})` } : undefined}>
           <canvas ref={canvas} className={`desktop-canvas ${viewOnly ? 'view-only' : ''}`} tabIndex={0} width={1280} height={720} aria-label="Ekran zdalnego komputera" />
         </div>

@@ -150,3 +150,33 @@ func TestMacOverlayFontsAreSystemFonts(t *testing.T) {
 		}
 	}
 }
+
+// Ruch wstrzyknięty przez agenta nie może liczyć się jako „osoba przy komputerze” (OVERVNC_MAC_SMOKE=1,
+// proces z zgodą „Dostępność”). Kursor przesuwa się o 1 pt i wraca.
+func TestMacLocalInputIgnoresOwnEvents(t *testing.T) {
+	if os.Getenv("OVERVNC_MAC_SMOKE") != "1" {
+		t.Skip("tylko ręcznie: OVERVNC_MAC_SMOKE=1")
+	}
+	if err := loadCG(); err != nil {
+		t.Fatal(err)
+	}
+	if !startLocalInputWatch() {
+		t.Skip("brak zgody „Dostępność” dla tego procesu")
+	}
+	time.Sleep(300 * time.Millisecond)
+	localInputAt.Store(0)
+	b := &macBackend{}
+	mons, _ := b.monitors()
+	p, _ := cursorPos()
+	m := mons[0]
+	for i := range 10 {
+		x := (p.X - float64(m.X) + float64(i%2)) / float64(m.W)
+		_ = b.input(InputEvent{T: "m", X: x, Y: (p.Y - float64(m.Y)) / float64(m.H)}, m)
+		time.Sleep(30 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if t0 := localInputAt.Load(); t0 != 0 {
+		t.Log("wykryto wejście lokalne — jeśli nikt nie ruszał myszą w trakcie testu, to błąd")
+		t.Fail()
+	}
+}

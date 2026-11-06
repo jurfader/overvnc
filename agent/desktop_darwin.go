@@ -592,6 +592,11 @@ func (b *macBackend) post(ev uintptr) {
 }
 
 func (b *macBackend) point(ev InputEvent, m MonitorInfo) cgPoint {
+	if ev.X < 0 { // zwolnienie przycisku „w miejscu” (osoba przy komputerze przejęła mysz)
+		if p, ok := cursorPos(); ok {
+			return p
+		}
+	}
 	x := math.Min(math.Max(ev.X, 0), 0.9999)
 	y := math.Min(math.Max(ev.Y, 0), 0.9999)
 	return cgPoint{float64(m.X) + x*float64(m.W), float64(m.Y) + y*float64(m.H)}

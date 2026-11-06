@@ -940,6 +940,18 @@ textarea.pole.editor-area { font: 12.5px/1.55 var(--font-mono); height: 58vh; mi
 .upload-row .btn { grid-column: 2; grid-row: 1 / span 2; }
 .inline-form select.pole { flex: 1; min-width: 180px; }
 .desktop-notice { margin: 8px 10px 0; }
+/* osoba przy komputerze używa myszy/klawiatury — plakietka nad obrazem (nie przesuwa układu) */
+.desktop-local {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 3; pointer-events: none;
+  display: inline-flex; align-items: center; gap: 6px; max-width: calc(100% - 20px);
+  padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: rgb(var(--surface) / 0.94); color: rgb(var(--info)); border: 1px solid rgb(var(--info) / 0.35);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.35); animation: fade 0.18s ease-out;
+}
+.desktop-local svg { width: 15px; height: 15px; flex-shrink: 0; }
+/* pierwszeństwo dla osoby przy komputerze wyłączone — przekreślona dłoń */
+.btn.yield-off { position: relative; }
+.btn.yield-off::after { content: ''; position: absolute; left: 50%; top: 50%; width: 20px; height: 2px; border-radius: 1px; background: currentColor; transform: translate(-50%, -50%) rotate(-45deg); }
 .desktop-notice .small { color: rgb(var(--ink-2)); margin-top: 2px; }
 .notice-retry { display: inline !important; color: rgb(var(--primary)) !important; font-weight: 600; }
 .desktop-notice code { overflow-wrap: anywhere; }

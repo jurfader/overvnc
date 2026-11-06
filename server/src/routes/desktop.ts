@@ -28,6 +28,8 @@ const Event = z.discriminatedUnion('t', [
     monitor: z.number().int().min(0).max(31).optional(),
     // kursor w obrazie: false — przeglądarka pokazuje własny (natychmiastowa reakcja na ruch myszy)
     cursor: z.boolean().optional(),
+    // pierwszeństwo dla osoby przy komputerze: gdy używa myszy/klawiatury, zdalne sterowanie czeka
+    yield: z.boolean().optional(),
   }),
   z.object({ t: z.literal('kf') }),
   // wklejenie: tekst do schowka komputera i Ctrl+V (to też wejście — w trybie podglądu zablokowane)
@@ -35,6 +37,7 @@ const Event = z.discriminatedUnion('t', [
 ]);
 const INPUT_TYPES = new Set(['m', 'b', 'w', 'k', 'clip']);
 const IDLE_MS = 60 * 60 * 1000;
+const MAX_EVENT_BYTES = 512 * 1024;
 const MAX_BUFFERED = 16 * 1024 * 1024;
 
 export async function desktopRoutes(app: FastifyInstance, ctx: Ctx) {
@@ -128,7 +131,8 @@ export async function desktopRoutes(app: FastifyInstance, ctx: Ctx) {
         );
 
       socket.on('message', (data, isBinary) => {
-        if (channel === null || isBinary || (data as Buffer).length > 1024) return;
+        // wklejany tekst do 100 000 znaków (UTF-8: do 4 bajtów na znak) + JSON
+        if (channel === null || isBinary || (data as Buffer).length > MAX_EVENT_BYTES) return;
         let ev: z.infer<typeof Event>;
         try {
           const r = Event.safeParse(JSON.parse(data.toString()));

@@ -111,12 +111,14 @@ W `hello` agent wysyła listę obsługiwanych poleceń. Serwer odrzuca polecenie
 - `b` — przycisk;
 - `w` — kółko;
 - `k` — klawisz (`KeyboardEvent.code`);
-- `cfg` — jakość lub monitor;
+- `cfg` — jakość, monitor, `cursor` (kursor w obrazie), `yield` (pierwszeństwo dla osoby przy komputerze, domyślnie włączone);
 - `kf` — pełna klatka.
 
-Serwer waliduje każde zdarzenie, a w trybie podglądu odrzuca wejście. **Zgoda** wynika z `clients.consent_mode`: `none` | `notify` (WTSSendMessage, bez blokowania) | `ask` (Tak/Nie, 30 s, brak odpowiedzi oznacza odmowę, `consent_denied`).
+Serwer waliduje każde zdarzenie, a w trybie podglądu odrzuca wejście.
 
-Na macOS i Linuksie pulpit nie jest jeszcze dostępny. `OVERVNC_DESKTOP_TEST=1` włącza syntetyczny ekran testowy (e2e).
+**Pierwszeństwo dla osoby przy komputerze** (od 0.18.0). Pomocnik rozpoznaje fizyczną mysz i klawiaturę: Windows — haki `WH_MOUSE_LL`/`WH_KEYBOARD_LL` i flaga `INJECTED` (zdarzenia z `SendInput` się nie liczą), macOS — `CGEventTap` tylko do odczytu i pole `kCGEventSourceUnixProcessID` (zdarzenia agenta niosą jego PID). Przez 1,5 s od ostatniego fizycznego ruchu lub klawisza zdalne zdarzenia (poza zwolnieniem tego, co wciśnięto zdalnie) są pomijane, a przy przejęciu pomocnik zwalnia zdalnie wciśnięte klawisze i przyciski. Informacja o pulpicie (`I`) ma wtedy `local: true`; `localWatch: true` oznacza, że agent to obsługuje. **Zgoda** wynika z `clients.consent_mode`: `none` | `notify` (WTSSendMessage, bez blokowania) | `ask` (Tak/Nie, 30 s, brak odpowiedzi oznacza odmowę, `consent_denied`).
+
+Na Linuksie pulpit nie jest dostępny. `OVERVNC_DESKTOP_TEST=1` włącza syntetyczny ekran testowy (e2e), a `OVERVNC_DESKTOP_TEST_LOCAL=1` dodatkowo udaje osobę przy komputerze (co 5 s przez 3 s „rusza myszą”).
 
 ### Aktualizacje (HTTP, uwierzytelnienie kluczem agenta)
 

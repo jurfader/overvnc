@@ -100,6 +100,19 @@ test('pulpit: tryb podglądu blokuje wejście na serwerze (ustawienia nadal dzia
   assert.deepEqual(e.chan.data, [{ t: 'cfg', quality: 'low' }]);
 });
 
+test('pulpit: pierwszeństwo dla osoby przy komputerze (cfg yield) i wklejanie długiego tekstu docierają do agenta', async (t) => {
+  const e = await env();
+  t.after(() => (e.agent.close(), e.s.close()));
+  const d = openDesktop(e.port, e.agentId, e.c, '');
+  await until(() => d.text.some((m) => m.type === 'ready'));
+  const long = 'ą'.repeat(5000);
+  d.ws.send(JSON.stringify({ t: 'cfg', yield: false }));
+  d.ws.send(JSON.stringify({ t: 'clip', text: long }));
+  await until(() => e.chan.data.length === 2);
+  assert.deepEqual(e.chan.data[0], { t: 'cfg', yield: false });
+  assert.equal((e.chan.data[1] as { text: string }).text, long);
+});
+
 test('pulpit: odmowa zgody przez użytkownika komputera', async (t) => {
   const e = await env();
   t.after(() => (e.agent.close(), e.s.close()));

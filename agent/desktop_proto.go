@@ -82,6 +82,10 @@ type DesktopInfo struct {
 	// Notice — problem do pokazania w panelu: "screen" (macOS: brak zgody na nagrywanie ekranu),
 	// "input" (macOS: brak zgody „Dostępność” — sterowanie nie działa), "screen,input"
 	Notice string `json:"notice,omitempty"`
+	// LocalWatch — agent rozpoznaje fizyczną mysz/klawiaturę (działa pierwszeństwo dla osoby przy komputerze);
+	// Local — osoba przy komputerze właśnie ich używa, więc zdalne sterowanie czeka
+	LocalWatch bool `json:"localWatch,omitempty"`
+	Local      bool `json:"local,omitempty"`
 }
 
 // InputEvent — zdarzenie z przeglądarki. Współrzędne X/Y w zakresie 0..1 względem bieżącego monitora.
@@ -97,6 +101,7 @@ type InputEvent struct {
 	Cursor  *bool   `json:"cursor,omitempty"` // cfg: kursor w obrazie (false = przeglądarka rysuje własny)
 	Text    string  `json:"text,omitempty"`   // clip: tekst do wklejenia (schowek komputera + Ctrl+V)
 	Monitor *int    `json:"monitor,omitempty"`
+	Yield   *bool   `json:"yield,omitempty"` // cfg: pierwszeństwo dla osoby przy komputerze (domyślnie włączone)
 }
 
 // qualitySettings — jakość JPEG i skala (2 = połowa rozdzielczości, dla wolnych łączy).

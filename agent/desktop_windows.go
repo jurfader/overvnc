@@ -535,7 +535,9 @@ func (b *gdiBackend) input(ev InputEvent, m MonitorInfo) error {
 	case "m":
 		b.moveTo(ev, m)
 	case "b":
-		b.moveTo(ev, m)
+		if ev.X >= 0 { // X < 0: zwolnienie „w miejscu” (osoba przy komputerze przejęła mysz)
+			b.moveTo(ev, m)
+		}
 		var f uint32
 		switch ev.B {
 		case 0:

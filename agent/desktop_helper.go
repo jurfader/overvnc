@@ -80,6 +80,8 @@ func runDesktopHelper() int {
 		return 1
 	}
 	defer be.close()
+	watching := startLocalInputWatch()
+	gate := newRemoteGate()
 
 	msgs := make(chan helperMsg, 1024)
 	go func() {
@@ -104,6 +106,7 @@ func runDesktopHelper() int {
 		lastInfo string
 		last     time.Time
 		lastErr  time.Time
+		local    bool // ostatnio wysłany stan „osoba przy komputerze używa myszy/klawiatury”
 	)
 	// fullFrame — następna klatka w całości; backend z przechwytywaniem „tylko zmian” (DXGI, ScreenCaptureKit)
 	// musi wtedy oddać obraz nawet bez zmian na ekranie
@@ -137,16 +140,36 @@ func runDesktopHelper() int {
 			desk = d
 			fullFrame() // inny pulpit (np. ekran blokady) — pełna klatka
 		}
-		info := DesktopInfo{Monitors: mons, Current: monitor().Index, Desktop: desk}
+		info := DesktopInfo{Monitors: mons, Current: monitor().Index, Desktop: desk, LocalWatch: watching}
 		if n, ok := be.(noticer); ok {
 			info.Notice = n.notice()
 		}
 		b, _ := json.Marshal(info)
-		if force || string(b) != lastInfo {
+		changed := force || string(b) != lastInfo
+		if changed {
 			lastInfo = string(b)
 			fullFrame()
+		}
+		// sama zmiana „osoba przy komputerze używa myszy” nie wymaga pełnej klatki
+		now := gate.yield && localActive(time.Now())
+		if changed || now != local {
+			local = now
+			info.Local = now
+			b, _ = json.Marshal(info)
 			_ = out.send(msgInfo, b)
 		}
+	}
+	// blocked — zdalne wejście czeka, bo osoba przy komputerze właśnie go używa; przy przejęciu
+	// zwalniamy to, co zdalnie wciśnięte, żeby nie przeszkadzał jej „zawieszony” klawisz
+	blocked := func() bool {
+		b := gate.yield && localActive(time.Now())
+		if b && !local {
+			for _, ev := range gate.releaseAll() {
+				_ = be.input(ev, monitor())
+			}
+			refreshInfo(false)
+		}
+		return b
 	}
 	refreshInfo(true)
 	infoTick := time.NewTicker(helperInfoInterval)
@@ -157,6 +180,9 @@ func runDesktopHelper() int {
 		frameInterval := be.interval()
 		if credits > 0 {
 			wait = max(time.Millisecond, frameInterval-time.Since(last))
+		}
+		if watching {
+			wait = min(wait, 250*time.Millisecond) // szybka informacja w panelu o przejęciu / zwolnieniu
 		}
 		select {
 		case m, ok := <-msgs:
@@ -186,9 +212,16 @@ func runDesktopHelper() int {
 					if ev.Cursor != nil {
 						be.setCursor(*ev.Cursor)
 					}
+					if ev.Yield != nil {
+						gate.yield = *ev.Yield
+						refreshInfo(false)
+					}
 				case "kf":
 					fullFrame()
 				case "clip":
+					if blocked() {
+						continue
+					}
 					// tekst do schowka komputera, potem Ctrl+V — wklejanie w dowolnym programie
 					if err := be.setClipboard(ev.Text); err != nil {
 						out.log("schowek: %v", err)
@@ -198,6 +231,9 @@ func runDesktopHelper() int {
 						_ = be.input(k, monitor())
 					}
 				default:
+					if !gate.allow(ev, blocked()) {
+						continue
+					}
 					if err := be.input(ev, monitor()); err != nil && time.Since(lastErr) > 5*time.Second {
 						lastErr = time.Now()
 						out.log("wejście: %v", err)
@@ -207,6 +243,10 @@ func runDesktopHelper() int {
 		case <-infoTick.C:
 			refreshInfo(false)
 		case <-time.After(wait):
+		}
+		if watching && gate.yield && localActive(time.Now()) != local {
+			blocked() // zwolnienie zdalnie wciśniętych przy przejęciu
+			refreshInfo(false)
 		}
 
 		if credits > 0 && time.Since(last) >= frameInterval {

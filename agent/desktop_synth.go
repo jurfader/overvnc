@@ -14,6 +14,22 @@ import (
 // ekranu — używany przez testy e2e na macOS i Linuksie.
 func desktopTestMode() bool { return os.Getenv("OVERVNC_DESKTOP_TEST") == "1" }
 
+// testLocalInput — ekran testowy udaje osobę przy komputerze (OVERVNC_DESKTOP_TEST_LOCAL=1):
+// co 5 s przez 3 s „rusza myszą”, więc zdalne sterowanie na zmianę czeka i działa.
+func testLocalInput() bool {
+	if os.Getenv("OVERVNC_DESKTOP_TEST_LOCAL") != "1" {
+		return false
+	}
+	go func() {
+		for start := time.Now(); ; time.Sleep(200 * time.Millisecond) {
+			if time.Since(start)%(5*time.Second) < 3*time.Second {
+				markLocalInput()
+			}
+		}
+	}()
+	return true
+}
+
 type execHelper struct {
 	cmd *exec.Cmd
 	in  io.WriteCloser
