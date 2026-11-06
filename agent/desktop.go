@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,23 +37,243 @@ type desktopOpenReq struct {
 	ViewOnly bool   `json:"viewOnly"`
 }
 
-// desktopSession — kanał pulpitu: wejście od serwera -> pomocnik, klatki pomocnika -> serwer.
-type desktopSession struct {
+// ---------- jedno przechwytywanie dla wszystkich oglądających ----------
+//
+// Kilka osób na pulpicie tego samego komputera dzieli jeden proces pomocnika: ekran jest
+// przechwytywany i kodowany raz, a klatki trafiają do każdego kanału. Tempo wyznacza najwolniejszy
+// oglądający (pomocnik dostaje zgodę na klatkę, gdy potwierdzą ją wszyscy). Monitor i jakość są
+// wspólne; kursor jest dorysowywany, gdy chce go ktokolwiek (np. podgląd), a schowek komputera trafia
+// tylko do tych, którzy go włączyli.
+
+var desktopGroups struct {
+	mu sync.Mutex
+	g  *desktopGroup
+}
+
+// spawnHelperFn — uruchomienie pomocnika (w testach zastępowane procesem w pamięci).
+var spawnHelperFn = spawnDesktopHelper
+
+// overlayFn — ramka „Aktywne Wsparcie Techniczne” (w testach zastępowana).
+var overlayFn = startSupportOverlay
+
+type desktopGroup struct {
 	proc    helperProc
-	mu      sync.Mutex
+	inMu    sync.Mutex // zapis do stdin pomocnika
+	mu      sync.Mutex // poniższe pola
+	viewers map[uint32]*desktopViewer
+	sent    uint64 // klatki rozesłane oglądającym
+	granted uint64 // zgody na klatki wysłane pomocnikowi
+	info    []byte // ostatnia informacja o monitorach — dla dołączających
+	cursor  *bool  // ostatnio wysłane ustawienie kursora
+	clip    *bool  // ostatnio wysłane ustawienie schowka
+	closing atomic.Bool
+
+	overlay      interface{ stop() }
+	overlayNames string
+}
+
+type desktopViewer struct {
+	g       *desktopGroup
+	ch      uint32
+	sess    *sessionIO
+	name    string
+	overlay bool // tryb zgody z ramką (notify / ask)
+	acked   uint64
+	cursor  bool // chce kursora w obrazie (domyślnie tak — dopóki panel nie powie inaczej)
+	clip    bool
 	once    sync.Once
-	closing atomic.Bool // zamknięcie zlecone przez nas (kod wyjścia pomocnika nie świadczy o awarii)
 }
 
-func (d *desktopSession) toHelper(typ byte, p []byte) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return writeMsg(d.proc.stdin(), typ, p)
+func (g *desktopGroup) toHelper(typ byte, p []byte) error {
+	g.inMu.Lock()
+	defer g.inMu.Unlock()
+	return writeMsg(g.proc.stdin(), typ, p)
 }
 
-// write — zdarzenie wejścia z przeglądarki (JSON) do pomocnika. Ctrl+Alt+Del wysyła sama usługa
-// (Windows przyjmuje je tylko od usługi działającej jako SYSTEM).
-func (d *desktopSession) write(p []byte) error {
+// grantLocked — pomocnik może mieć najwyżej helperMaxCredits klatek ponad to, co potwierdził
+// najwolniejszy oglądający.
+func (g *desktopGroup) grantLocked() {
+	if len(g.viewers) == 0 {
+		return
+	}
+	minAcked := g.sent
+	for _, v := range g.viewers {
+		minAcked = min(minAcked, v.acked)
+	}
+	for target := minAcked + helperMaxCredits; g.granted < target; g.granted++ {
+		_ = g.toHelper(msgNext, nil)
+	}
+}
+
+// syncSettingsLocked — wspólne ustawienia pomocnika wynikające z wszystkich oglądających.
+func (g *desktopGroup) syncSettingsLocked() {
+	cursor, clip := false, false
+	for _, v := range g.viewers {
+		cursor = cursor || v.cursor
+		clip = clip || v.clip
+	}
+	var ev InputEvent
+	ev.T = "cfg"
+	if g.cursor == nil || *g.cursor != cursor {
+		ev.Cursor, g.cursor = &cursor, &cursor
+	}
+	if g.clip == nil || *g.clip != clip {
+		ev.ClipSync, g.clip = &clip, &clip
+	}
+	if ev.Cursor != nil || ev.ClipSync != nil {
+		b, _ := json.Marshal(ev)
+		_ = g.toHelper(msgEvent, b)
+	}
+}
+
+// syncOverlayLocked — ramka u użytkownika komputera pokazuje wszystkich połączonych (tryby z ramką).
+func (g *desktopGroup) syncOverlayLocked() {
+	var names []string
+	for _, v := range g.viewers {
+		if v.overlay && !slices.Contains(names, v.name) {
+			names = append(names, v.name)
+		}
+	}
+	slices.Sort(names)
+	joined := strings.Join(names, ", ")
+	if joined == g.overlayNames && (g.overlay != nil || joined == "") {
+		return
+	}
+	if g.overlay != nil {
+		g.overlay.stop()
+		g.overlay = nil
+	}
+	g.overlayNames = joined
+	if joined != "" {
+		g.overlay = overlayFn(joined)
+	}
+}
+
+// join dodaje oglądającego: dostaje bieżącą informację o monitorach i pełną klatkę.
+func (g *desktopGroup) join(v *desktopViewer) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	v.acked = g.sent
+	g.viewers[v.ch] = v
+	if g.info != nil {
+		_ = v.sess.writeBinary(encodeFrame(frameData, v.ch, append([]byte{msgInfo}, g.info...)))
+	}
+	if len(g.viewers) > 1 {
+		_ = g.toHelper(msgEvent, []byte(`{"t":"kf"}`))
+	}
+	g.syncSettingsLocked()
+	g.syncOverlayLocked()
+	g.grantLocked()
+}
+
+// leave usuwa oglądającego; ostatni zamyka pomocnika.
+func (g *desktopGroup) leave(v *desktopViewer) {
+	g.mu.Lock()
+	if g.viewers[v.ch] != v {
+		g.mu.Unlock()
+		return
+	}
+	delete(g.viewers, v.ch)
+	last := len(g.viewers) == 0
+	g.syncOverlayLocked() // ostatni wychodzi -> ramka znika od razu
+	if !last {
+		g.syncSettingsLocked()
+		g.grantLocked()
+	}
+	g.mu.Unlock()
+	if last {
+		g.shutdown()
+	}
+}
+
+func (g *desktopGroup) shutdown() {
+	if g.closing.Swap(true) {
+		return
+	}
+	desktopGroups.mu.Lock()
+	if desktopGroups.g == g {
+		desktopGroups.g = nil // następne połączenie uruchomi nowego pomocnika
+	}
+	desktopGroups.mu.Unlock()
+	_ = g.toHelper(msgQuit, nil)
+	go func() {
+		time.Sleep(2 * time.Second)
+		g.proc.kill()
+	}()
+}
+
+// broadcast — wiadomość pomocnika do oglądających. Klatki do wszystkich, schowek tylko do chętnych.
+func (g *desktopGroup) broadcast(typ byte, p []byte) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	switch typ {
+	case msgFrame:
+		g.sent++
+	case msgInfo:
+		g.info = p
+	}
+	msg := append([]byte{typ}, p...)
+	for _, v := range g.viewers {
+		if typ == msgClip && !v.clip {
+			continue
+		}
+		// błąd zapisu = zerwane połączenie z serwerem; kanały zamknie wtedy closeAll
+		_ = v.sess.writeBinary(encodeFrame(frameData, v.ch, msg))
+	}
+}
+
+// run czyta wiadomości pomocnika do jego zakończenia; potem zamyka kanały wszystkich oglądających.
+func (g *desktopGroup) run() {
+	r := bufio.NewReaderSize(g.proc.stdout(), 256<<10)
+	reason := ""
+	for {
+		typ, p, err := readMsg(r)
+		if err != nil {
+			break
+		}
+		switch typ {
+		case msgFrame, msgInfo, msgClip:
+			g.broadcast(typ, p)
+		case msgLog:
+			reason = string(p)
+			logger.Infof("pulpit: %s", p)
+		}
+	}
+	code := g.proc.wait()
+	if helperCrashed(code) && !g.closing.Load() && !captureGDIOnly.Swap(true) {
+		logger.Warningf("pulpit: pomocnik zakończył się awarią (kod %#x) — kolejne sesje przez GDI", uint32(code))
+	}
+	g.closing.Store(true)
+	desktopGroups.mu.Lock()
+	if desktopGroups.g == g {
+		desktopGroups.g = nil
+	}
+	desktopGroups.mu.Unlock()
+
+	g.mu.Lock()
+	viewers := g.viewers
+	g.viewers = map[uint32]*desktopViewer{}
+	if g.overlay != nil {
+		g.overlay.stop()
+		g.overlay = nil
+	}
+	g.mu.Unlock()
+	for _, v := range viewers {
+		if v.sess.channels.remove(v.ch) != nil {
+			ev := map[string]any{"channel": v.ch, "exitCode": 0}
+			if reason != "" {
+				ev["error"] = reason
+			}
+			_ = v.sess.event("channel.closed", ev)
+		}
+	}
+}
+
+// ---------- kanał jednego oglądającego ----------
+
+// write — zdarzenie z przeglądarki (JSON). Ctrl+Alt+Del wysyła sama usługa (Windows przyjmuje je
+// tylko od usługi działającej jako SYSTEM); ustawienia kursora i schowka są łączone dla wszystkich.
+func (v *desktopViewer) write(p []byte) error {
 	if len(p) < 64 && bytes.Contains(p, []byte(`"sas"`)) {
 		var ev struct {
 			T string `json:"t"`
@@ -63,22 +285,39 @@ func (d *desktopSession) write(p []byte) error {
 			return nil
 		}
 	}
-	return d.toHelper(msgEvent, p)
+	if bytes.Contains(p, []byte(`"cfg"`)) {
+		var ev InputEvent
+		if json.Unmarshal(p, &ev) == nil && ev.T == "cfg" && (ev.Cursor != nil || ev.ClipSync != nil) {
+			g := v.g
+			g.mu.Lock()
+			if ev.Cursor != nil {
+				v.cursor = *ev.Cursor
+			}
+			if ev.ClipSync != nil {
+				v.clip = *ev.ClipSync
+			}
+			g.syncSettingsLocked()
+			g.mu.Unlock()
+			ev.Cursor, ev.ClipSync = nil, nil
+			if ev.Quality == "" && ev.Monitor == nil && ev.Yield == nil {
+				return nil
+			}
+			p, _ = json.Marshal(ev)
+		}
+	}
+	return v.g.toHelper(msgEvent, p)
 }
 
-// ack — przeglądarka narysowała klatkę: pozwól pomocnikowi wysłać kolejną.
-func (d *desktopSession) ack(int) { _ = d.toHelper(msgNext, nil) }
-
-func (d *desktopSession) close() {
-	d.once.Do(func() {
-		d.closing.Store(true)
-		_ = d.toHelper(msgQuit, nil)
-		go func() {
-			time.Sleep(2 * time.Second)
-			d.proc.kill()
-		}()
-	})
+// ack — przeglądarka narysowała klatkę.
+func (v *desktopViewer) ack(n int) {
+	g := v.g
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	v.acked = min(v.acked+uint64(max(n, 1)), g.sent)
+	g.grantLocked()
 }
+
+func (v *desktopViewer) close() { v.once.Do(func() { v.g.leave(v) }) }
 
 func handleDesktopOpen(ctx context.Context, data json.RawMessage) (any, error) {
 	sess, err := sessionFrom(ctx)
@@ -94,72 +333,38 @@ func handleDesktopOpen(ctx context.Context, data json.RawMessage) (any, error) {
 	} else if !ok {
 		return nil, protoErr("consent_denied", "użytkownik komputera nie zgodził się na połączenie")
 	}
-	var args []string
-	if captureGDIOnly.Load() {
-		args = append(args, "gdi")
-	}
 
-	proc, err := spawnDesktopHelper(args...)
-	if err != nil {
-		return nil, protoErr("helper", "nie można uruchomić przechwytywania ekranu: %v", err)
+	desktopGroups.mu.Lock()
+	g := desktopGroups.g
+	fresh := g == nil || g.closing.Load()
+	if fresh {
+		var args []string
+		if captureGDIOnly.Load() {
+			args = append(args, "gdi")
+		}
+		proc, err := spawnHelperFn(args...)
+		if err != nil {
+			desktopGroups.mu.Unlock()
+			return nil, protoErr("helper", "nie można uruchomić przechwytywania ekranu: %v", err)
+		}
+		g = &desktopGroup{proc: proc, viewers: map[uint32]*desktopViewer{}}
+		desktopGroups.g = g
+		// ustawienia początkowe od pierwszego oglądającego; kolejni dołączają do bieżącego obrazu
+		cfg, _ := json.Marshal(InputEvent{T: "cfg", Quality: req.Quality, Monitor: req.Monitor})
+		_ = g.toHelper(msgEvent, cfg)
+		go g.run()
 	}
-	d := &desktopSession{proc: proc}
+	desktopGroups.mu.Unlock()
+
 	// użytkownik ma wiedzieć, że ktoś jest połączony — ramka przez całą sesję (tryby „z powiadomieniem” i „z pytaniem”)
-	var overlay interface{ stop() }
-	if req.Consent == "notify" || req.Consent == "ask" {
-		overlay = startSupportOverlay(req.Viewer)
-	}
-	if err := sess.channels.add(req.Channel, d); err != nil {
-		proc.kill()
-		if overlay != nil {
-			overlay.stop()
+	v := &desktopViewer{g: g, ch: req.Channel, sess: sess, name: req.Viewer, overlay: req.Consent == "notify" || req.Consent == "ask", cursor: true}
+	if err := sess.channels.add(req.Channel, v); err != nil {
+		if fresh {
+			g.shutdown()
 		}
 		return nil, err
 	}
-	// ustawienia początkowe i zgoda na 2 klatki „w drodze”
-	cfg, _ := json.Marshal(InputEvent{T: "cfg", Quality: req.Quality, Monitor: req.Monitor})
-	_ = d.toHelper(msgEvent, cfg)
-	for range helperMaxCredits {
-		_ = d.toHelper(msgNext, nil)
-	}
-
-	go func() {
-		r := bufio.NewReaderSize(proc.stdout(), 256<<10)
-		reason := ""
-		for {
-			typ, p, err := readMsg(r)
-			if err != nil {
-				break
-			}
-			switch typ {
-			case msgFrame, msgInfo, msgClip:
-				// do serwera bez dzielenia na kawałki — przeglądarka dostaje całą klatkę jednym komunikatem
-				if sess.writeBinary(encodeFrame(frameData, req.Channel, append([]byte{typ}, p...))) != nil {
-					reason = "connection"
-				}
-			case msgLog:
-				reason = string(p)
-				logger.Infof("pulpit %d: %s", req.Channel, p)
-			}
-			if reason == "connection" {
-				break
-			}
-		}
-		code := proc.wait()
-		if overlay != nil {
-			overlay.stop()
-		}
-		if helperCrashed(code) && !d.closing.Load() && !captureGDIOnly.Swap(true) {
-			logger.Warningf("pulpit %d: pomocnik zakończył się awarią (kod %#x) — kolejne sesje przez GDI", req.Channel, uint32(code))
-		}
-		if sess.channels.remove(req.Channel) != nil {
-			ev := map[string]any{"channel": req.Channel, "exitCode": 0}
-			if reason != "" && reason != "connection" {
-				ev["error"] = reason
-			}
-			_ = sess.event("channel.closed", ev)
-		}
-	}()
+	g.join(v)
 	return map[string]any{"ok": true}, nil
 }
 

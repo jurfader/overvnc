@@ -102,6 +102,8 @@ W `hello` agent wysyła listę obsługiwanych poleceń. Serwer odrzuca polecenie
 
 **Agent.** Usługa w sesji 0 nie widzi ekranu, więc uruchamia `overvnc-agent desktop-helper` jako SYSTEM w sesji konsoli (token z `TokenSessionId`, `CreateProcessAsUser` na `winsta0\default`). Pomocnik przechwytuje ekran przez GDI w trybie Per-Monitor-DPI-V2 i przełącza się na bieżący pulpit wejściowy (ekran blokady/UAC). Wejście wstrzykuje przez `SetCursorPos` i `SendInput` (scancode'y). Usługa i pomocnik komunikują się przez stdin/stdout: `[typ][długość u32][dane]` (`F` klatka, `I` monitory, `L` log, `N` zgoda na klatkę, `E` zdarzenie, `Q` koniec).
 
+**Kilka osób na jednym pulpicie** (od 0.18.0). Wszyscy oglądający ten sam komputer dzielą jeden proces pomocnika: ekran jest przechwytywany i kodowany raz, klatki trafiają do każdego kanału. Pomocnik dostaje zgodę na kolejną klatkę, gdy potwierdzi ją najwolniejszy oglądający (najwyżej 3 klatki w drodze). Dołączający od razu dostaje ostatnią informację `I`, a pomocnik wysyła pełną klatkę. Monitor, jakość i pierwszeństwo są wspólne (ostatnia zmiana wygrywa). Kursor jest dorysowywany, gdy chce go ktokolwiek, a schowek `C` trafia tylko do kanałów z `clipSync`. Ramka u użytkownika komputera pokazuje wszystkie połączone osoby. Ostatni wychodzący zamyka pomocnika.
+
 **Klatka** (`F`) to `seq u32, szer u16, wys u16, n u16` i `n` × (`x, y, w, h` u16, `długość` u32, JPEG). Wysyłane są tylko kafelki 128×128, które się zmieniły.
 
 **Tempo.** Najwyżej 2 klatki w drodze. Przeglądarka wysyła `{"t":"ack"}` po narysowaniu klatki, serwer zamienia to na ramkę ack dla agenta, a ten pozwala pomocnikowi wysłać następną klatkę (maks. ~15 kl./s).
