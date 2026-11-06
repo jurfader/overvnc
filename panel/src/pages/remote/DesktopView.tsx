@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ClipboardCopy, ClipboardPaste, Expand, Eye, Hand, Keyboard, Lock, Maximize2, Minimize2, MonitorSmartphone, MousePointer2, Plug, RotateCcw, ShieldAlert, Shrink, Users, ZoomOut } from 'lucide-react';
+import { ClipboardCopy, ClipboardPaste, Command, Expand, Eye, Hand, Keyboard, Lock, Maximize2, Minimize2, MonitorSmartphone, MousePointer2, Plug, RotateCcw, ShieldAlert, ShieldEllipsis, Shrink, Users, ZoomOut } from 'lucide-react';
 import type { Agent } from '../../api.ts';
-import { Badge, Button, EmptyState, toast } from '../../components.tsx';
+import { Badge, Button, Dropdown, EmptyState, toast } from '../../components.tsx';
 import { bytes, plural } from '../../format.ts';
 import { keyForChar } from './keytext.ts';
 
@@ -83,6 +83,31 @@ const DESK_KEYS: { label: string; code?: string; wheel?: number; title?: string 
   { label: '⇡ przewiń', wheel: -360, title: 'Przewiń w górę' },
   { label: '⇣ przewiń', wheel: 360, title: 'Przewiń w dół' },
 ];
+/** Sterujesz z Maca: Cmd zastępuje Ctrl na Windowsie/Linuksie (Cmd+C, Cmd+A…), jak w AnyDesk. */
+const OPERATOR_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+const MODIFIER_CODES = new Set(['ControlLeft', 'ControlRight', 'AltLeft', 'AltRight', 'ShiftLeft', 'ShiftRight', 'MetaLeft', 'MetaRight', 'CapsLock']);
+
+/** Skróty z menu „Klawisze” (kombinacje, których nie da się nacisnąć w przeglądarce albo bez Win). */
+const SHORTCUTS: Record<'windows' | 'darwin', { label: string; code: string; mods: string[] }[]> = {
+  windows: [
+    { label: 'Win (menu Start)', code: 'MetaLeft', mods: [] },
+    { label: 'Win+R — Uruchom', code: 'KeyR', mods: ['MetaLeft'] },
+    { label: 'Win+E — Eksplorator plików', code: 'KeyE', mods: ['MetaLeft'] },
+    { label: 'Win+D — pokaż pulpit', code: 'KeyD', mods: ['MetaLeft'] },
+    { label: 'Alt+Tab — przełącz okno', code: 'Tab', mods: ['AltLeft'] },
+    { label: 'Alt+F4 — zamknij okno', code: 'F4', mods: ['AltLeft'] },
+    { label: 'Ctrl+Shift+Esc — Menedżer zadań', code: 'Escape', mods: ['ControlLeft', 'ShiftLeft'] },
+    { label: 'Print Screen', code: 'PrintScreen', mods: [] },
+  ],
+  darwin: [
+    { label: 'Cmd+Tab — przełącz aplikację', code: 'Tab', mods: ['MetaLeft'] },
+    { label: 'Cmd+Spacja — Spotlight', code: 'Space', mods: ['MetaLeft'] },
+    { label: 'Cmd+Q — zamknij aplikację', code: 'KeyQ', mods: ['MetaLeft'] },
+    { label: 'Cmd+Option+Esc — wymuś zakończenie', code: 'Escape', mods: ['MetaLeft', 'AltLeft'] },
+    { label: 'Cmd+Shift+3 — zrzut ekranu', code: 'Digit3', mods: ['MetaLeft', 'ShiftLeft'] },
+  ],
+};
+
 const MOD_KEYS: { key: keyof Mods; label: string }[] = [
   { key: 'ctrl', label: 'Ctrl' },
   { key: 'alt', label: 'Alt' },
@@ -135,6 +160,10 @@ export function DesktopView({ agent }: { agent: Agent }) {
   const dcRef = useRef<RTCDataChannel | null>(null);
   const lastInput = useRef(0);
   const [route, setRoute] = useState<'direct' | 'turn' | null>(null);
+  const macToPc = useRef(false);
+  macToPc.current = OPERATOR_MAC && agent.os !== 'darwin';
+  const sasRef = useRef(false);
+  sasRef.current = !!info?.sas;
 
   const supported = agent.online && agent.capabilities.includes('desktop.open');
   const send = (ev: { t: string; [k: string]: unknown }) => {
@@ -454,17 +483,45 @@ export function DesktopView({ agent }: { agent: Agent }) {
     const onKey = (d: boolean) => (e: KeyboardEvent) => {
       // Ctrl+V / Cmd+V: przeglądarka odda tekst ze schowka (zdarzenie paste) — wkleimy go przez schowek komputera
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV' && !viewOnlyRef.current) {
-        // Cmd trafia do komputera jako Win (Windows) / Cmd (macOS) — zwolnij go; wklejenie robi agent przez schowek
-        for (const code of ['MetaLeft', 'MetaRight']) {
+        // zwolnij Cmd/Win (i Ctrl z Cmd na Macu) — wklejenie robi agent przez schowek, z właściwym klawiszem
+        for (const code of ['MetaLeft', 'MetaRight', ...(macToPc.current ? ['ControlLeft', 'ControlRight'] : [])]) {
           if (pressedKeys.current.delete(code)) send({ t: 'k', code, d: false });
         }
         return;
       }
       e.preventDefault(); // skróty trafiają do zdalnego komputera, nie do przeglądarki
       if (!e.code || viewOnlyRef.current) return;
-      if (d) pressedKeys.current.add(e.code);
-      else pressedKeys.current.delete(e.code);
-      send({ t: 'k', code: e.code, d });
+      // Ctrl+Alt+Del: w przeglądarce Ctrl/Cmd + Alt/Option + Delete (na Macu fn+Backspace) albo Backspace
+      if (d && (e.code === 'Delete' || e.code === 'Backspace') && e.altKey && (e.ctrlKey || e.metaKey) && sasRef.current) {
+        for (const code of [...pressedKeys.current]) send({ t: 'k', code, d: false });
+        pressedKeys.current.clear();
+        send({ t: 'sas' });
+        toast('Wysłano Ctrl+Alt+Del');
+        return;
+      }
+      // z Maca na Windows/Linux: Cmd = Ctrl
+      let code = e.code;
+      if (macToPc.current && (code === 'MetaLeft' || code === 'MetaRight')) code = code === 'MetaLeft' ? 'ControlLeft' : 'ControlRight';
+      // macOS nie zgłasza puszczenia litery, gdy trzymany jest Cmd — naciśnięcie od razu z puszczeniem
+      if (OPERATOR_MAC && e.metaKey && !MODIFIER_CODES.has(code)) {
+        if (d) {
+          send({ t: 'k', code, d: true });
+          send({ t: 'k', code, d: false });
+        }
+        return;
+      }
+      if (d) pressedKeys.current.add(code);
+      else pressedKeys.current.delete(code);
+      send({ t: 'k', code, d });
+      // puszczenie Cmd: zwolnij litery, których puszczenia macOS mógł nie zgłosić
+      if (!d && OPERATOR_MAC && (e.code === 'MetaLeft' || e.code === 'MetaRight')) {
+        for (const k of [...pressedKeys.current]) {
+          if (!MODIFIER_CODES.has(k)) {
+            pressedKeys.current.delete(k);
+            send({ t: 'k', code: k, d: false });
+          }
+        }
+      }
     };
 
     // --- dotyk: stuknięcie = klik, przytrzymanie = prawy klik, przeciąganie = przeciąganie myszą,
@@ -851,10 +908,21 @@ export function DesktopView({ agent }: { agent: Agent }) {
               <span className="btn-label">Kopiuj z komputera</span>
             </Button>
           )}
-          {state === 'ready' && !viewOnly && info?.sas && (
-            <Button size="sm" variant="ghost" className="only-desktop" title="Wyślij Ctrl+Alt+Del (ekran zabezpieczeń Windows: blokada, wylogowanie, Menedżer zadań, zmiana hasła)" onClick={sendSAS}>
-              <span className="mono small">Ctrl+Alt+Del</span>
-            </Button>
+          {state === 'ready' && !viewOnly && !waitingForControl && (
+            <Dropdown
+              size="sm"
+              variant="ghost"
+              icon={Command}
+              title={
+                macToPc.current
+                  ? 'Klawisze specjalne. Z Maca: Cmd działa jak Ctrl (Cmd+C, Cmd+A…), Ctrl+Option+Delete = Ctrl+Alt+Del'
+                  : 'Klawisze specjalne i skróty (Ctrl+Alt+Delete na klawiaturze też działa)'
+              }
+              items={[
+                ...(info?.sas ? [{ key: 'sas', label: 'Ctrl+Alt+Del', icon: ShieldEllipsis, onClick: sendSAS }] : []),
+                ...SHORTCUTS[agent.os === 'darwin' ? 'darwin' : 'windows'].map((s) => ({ key: s.label, label: s.label, onClick: () => tapKey(s.code, s.mods) })),
+              ]}
+            />
           )}
           {state === 'ready' && !viewOnly && <Button size="sm" variant="ghost" icon={ClipboardPaste} title="Wklej tekst ze schowka (albo Ctrl+V na obrazie)" onClick={() => void pasteFromClipboard()} />}
           {zoom.s > 1 && <Button size="sm" variant="ghost" icon={ZoomOut} title="Pomniejsz (cały ekran)" onClick={() => setZoom(NO_ZOOM)} />}

@@ -366,14 +366,30 @@ export interface MenuItem {
 }
 
 /** Przycisk z menu akcji (na telefonie — panel od dołu ekranu). */
-export function Dropdown({ icon, label, title, items }: { icon?: LucideIcon; label?: ReactNode; title?: string; items: MenuItem[] }) {
+export function Dropdown({
+  icon,
+  label,
+  title,
+  items,
+  variant,
+  size,
+  className,
+}: {
+  icon?: LucideIcon;
+  label?: ReactNode;
+  title?: string;
+  items: MenuItem[];
+  variant?: ButtonProps['variant'];
+  size?: ButtonProps['size'];
+  className?: string;
+}) {
   const [open, setOpen] = useState(false);
   const close = useRef(() => setOpen(false)).current;
   const ref = useDismiss<HTMLDivElement>(open, close);
   if (items.length === 0) return null;
   return (
-    <div className="dropdown" ref={ref}>
-      <Button icon={icon} title={title} aria-label={title} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+    <div className={`dropdown ${className ?? ''}`} ref={ref}>
+      <Button icon={icon} variant={variant} size={size} title={title} aria-label={title} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         {label}
       </Button>
       {open && (
