@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ClipboardCopy, ClipboardPaste, Expand, Eye, Hand, Keyboard, Lock, Maximize2, Minimize2, MonitorSmartphone, MousePointer2, Plug, RotateCcw, ShieldAlert, Shrink, ZoomOut } from 'lucide-react';
+import { ClipboardCopy, ClipboardPaste, Expand, Eye, Hand, Keyboard, Lock, Maximize2, Minimize2, MonitorSmartphone, MousePointer2, Plug, RotateCcw, ShieldAlert, Shrink, Users, ZoomOut } from 'lucide-react';
 import type { Agent } from '../../api.ts';
 import { Badge, Button, EmptyState, toast } from '../../components.tsx';
 import { bytes, plural } from '../../format.ts';
@@ -27,6 +27,11 @@ interface DesktopInfo {
   local?: boolean;
   /** można wysłać Ctrl+Alt+Del (Windows) */
   sas?: boolean;
+}
+
+/** kto jest połączony z tym pulpitem i kto steruje (agent wysyła każdemu oglądającemu osobno) */
+interface Presence {
+  viewers: { name: string; viewOnly?: boolean; control?: boolean; you?: boolean }[];
 }
 
 const YIELD_KEY = 'overvnc.desktop.yield';
@@ -120,6 +125,9 @@ export function DesktopView({ agent }: { agent: Agent }) {
   yieldRef.current = yieldLocal;
   // tekst skopiowany na komputerze, którego przeglądarka nie pozwoliła wpisać do schowka bez kliknięcia
   const [pendingClip, setPendingClip] = useState<string | null>(null);
+  // kilka osób na pulpicie: steruje jedna, pozostali mogą przejąć sterowanie przyciskiem
+  const [presence, setPresence] = useState<Presence | null>(null);
+  const hadControl = useRef<boolean | null>(null);
 
   const supported = agent.online && agent.capabilities.includes('desktop.open');
   const send = (ev: object) => {
@@ -134,6 +142,8 @@ export function DesktopView({ agent }: { agent: Agent }) {
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
     setState('connecting');
+    setPresence(null);
+    hadControl.current = null;
     setMessage('');
     let queue = Promise.resolve();
     let frames = 0;
@@ -168,6 +178,10 @@ export function DesktopView({ agent }: { agent: Agent }) {
       }
       if (kind === 'C') {
         receiveClip(new TextDecoder().decode(new Uint8Array(buf, 1)));
+        return;
+      }
+      if (kind === 'P') {
+        receivePresence(JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1))) as Presence);
         return;
       }
       if (kind !== 'F') return;
@@ -519,6 +533,18 @@ export function DesktopView({ agent }: { agent: Agent }) {
       () => toast('Przeglądarka nie pozwoliła na zapis do schowka', 'err'),
     );
   };
+  const receivePresence = (p: Presence) => {
+    setPresence(p);
+    const me = p.viewers.find((v) => v.you);
+    if (!me || me.viewOnly) return;
+    const ctl = !!me.control;
+    const controller = p.viewers.find((v) => v.control);
+    if (hadControl.current === true && !ctl) toast(`Sterowanie przejęła inna osoba: ${controller?.name ?? 'ktoś'} — Ty teraz oglądasz`);
+    if (hadControl.current === false && ctl) toast('Sterujesz komputerem');
+    hadControl.current = ctl;
+  };
+  const takeControl = () => send({ t: 'take' });
+
   const sendSAS = () => {
     send({ t: 'sas' });
     toast('Wysłano Ctrl+Alt+Del');
@@ -588,6 +614,11 @@ export function DesktopView({ agent }: { agent: Agent }) {
     );
 
   const secure = info?.desktop && info.desktop.toLowerCase() !== 'default';
+  const me = presence?.viewers.find((v) => v.you);
+  const others = presence?.viewers.filter((v) => !v.you) ?? [];
+  const controller = presence?.viewers.find((v) => v.control);
+  // starszy agent nie wysyła listy połączonych — wtedy sterujesz jak dotąd
+  const waitingForControl = state === 'ready' && !viewOnly && !!me && !me.control;
   const toggleYield = () => {
     const next = !yieldLocal;
     setYieldLocal(next);
@@ -608,9 +639,18 @@ export function DesktopView({ agent }: { agent: Agent }) {
             style={{ color: state === 'ready' ? 'rgb(var(--success))' : state === 'closed' ? 'rgb(var(--faint))' : 'rgb(var(--warning))' }}
           />
           <span className="small">
-            {state === 'ready' ? (viewOnly ? 'Podgląd' : 'Sterowanie') : state === 'consent' ? 'Czekam na zgodę użytkownika komputera…' : state === 'connecting' ? 'Łączenie…' : 'Sesja zakończona'}
+            {state === 'ready' ? (viewOnly ? 'Podgląd' : waitingForControl ? 'Oglądasz' : 'Sterowanie') : state === 'consent' ? 'Czekam na zgodę użytkownika komputera…' : state === 'connecting' ? 'Łączenie…' : 'Sesja zakończona'}
           </span>
         </div>
+        {others.length > 0 && (
+          <span
+            className="desk-viewers small"
+            title={others.map((v) => `${v.name}${v.control ? ' — steruje' : v.viewOnly ? ' — podgląd' : ' — czeka'}`).join('\n')}
+          >
+            <Users /> {others.length === 1 ? others[0].name : `${others.length} ${plural(others.length, 'osoba', 'osoby', 'osób')}`}
+            <span className="only-desktop muted">{others.length === 1 ? (others[0].control ? ' · steruje' : others[0].viewOnly ? ' · podgląd' : ' · czeka') : ' także połączone'}</span>
+          </span>
+        )}
         {secure && (
           <Badge variant="warning">
             <ShieldAlert /> Ekran blokady / UAC
@@ -699,10 +739,21 @@ export function DesktopView({ agent }: { agent: Agent }) {
       {info?.notice && <MacPermissionNotice notice={info.notice} onRetry={() => setSession((n) => n + 1)} />}
       <div className="desktop-stage" ref={stage}>
         {/* nad obrazem, nie w pasku narzędzi — pojawia się i znika co chwilę, nie może przesuwać układu */}
-        {state === 'ready' && !viewOnly && info?.local && (
-          <div className="desktop-local" role="status">
-            <Hand /> Ktoś przy komputerze — sterowanie czeka
+        {waitingForControl ? (
+          <div className="desktop-local desktop-take" role="status">
+            <Users /> <span className="ellipsis">Steruje {controller?.name ?? 'inna osoba'}</span>
+            <button type="button" className="btn btn-primary btn-sm" onClick={takeControl}>
+              Przejmij sterowanie
+            </button>
           </div>
+        ) : (
+          state === 'ready' &&
+          !viewOnly &&
+          info?.local && (
+            <div className="desktop-local" role="status">
+              <Hand /> Ktoś przy komputerze — sterowanie czeka
+            </div>
+          )
         )}
         <div className="desktop-zoom" style={zoom.s > 1 ? { transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.s})` } : undefined}>
           <canvas ref={canvas} className={`desktop-canvas ${viewOnly ? 'view-only' : ''}`} tabIndex={0} width={1280} height={720} aria-label="Ekran zdalnego komputera" />

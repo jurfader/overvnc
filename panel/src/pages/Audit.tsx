@@ -69,6 +69,7 @@ const ACTIONS: Record<string, [string, Tone]> = {
   'desktop.open': ['Otwarcie pulpitu zdalnego', 'warning'],
   'desktop.close': ['Zamknięcie pulpitu zdalnego', 'neutral'],
   'desktop.sas': ['Ctrl+Alt+Del na pulpicie zdalnym', 'warning'],
+  'desktop.take': ['Przejęcie sterowania pulpitem', 'neutral'],
 };
 
 export function Audit() {

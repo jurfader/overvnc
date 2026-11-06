@@ -35,6 +35,8 @@ const (
 	msgEvent = 'E'
 	msgQuit  = 'Q'
 	msgClip  = 'C' // pomocnik -> przeglądarka: tekst skopiowany na komputerze (UTF-8)
+	// usługa -> przeglądarka: kto jest połączony i kto steruje (JSON, osobno dla każdego oglądającego)
+	msgPresence = 'P'
 
 	maxHelperMsg = 32 << 20
 	tileSize     = 128

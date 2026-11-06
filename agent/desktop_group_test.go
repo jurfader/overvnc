@@ -117,10 +117,32 @@ func newFakeServer() *fakeServer {
 	}
 	return s
 }
+
+// got — wiadomości pomocnika (bez 'P' — kto jest połączony).
 func (s *fakeServer) got(ch uint32) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]string(nil), s.frames[ch]...)
+	var out []string
+	for _, f := range s.frames[ch] {
+		if f[0] != msgPresence {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// presence — ostatnia informacja „kto jest połączony” dla kanału.
+func (s *fakeServer) presence(ch uint32) presence {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var p presence
+	for _, f := range s.frames[ch] {
+		if f[0] == msgPresence {
+			p = presence{} // nowa wartość — pola z omitempty nie mogą zostać z poprzedniej wiadomości
+			_ = json.Unmarshal([]byte(f[1:]), &p)
+		}
+	}
+	return p
 }
 
 func waitUntil(t *testing.T, what string, cond func() bool) {
@@ -253,3 +275,67 @@ func TestDesktopGroupOverlayNames(t *testing.T) {
 type stopFn func()
 
 func (f stopFn) stop() { f() }
+
+func TestDesktopControlHandover(t *testing.T) {
+	var h *fakeHelper
+	spawnHelperFn = func(...string) (helperProc, error) { h = newFakeHelper(); return h, nil }
+	overlayFn = func(string) interface{ stop() } { return nil }
+	t.Cleanup(func() { spawnHelperFn, overlayFn = spawnDesktopHelper, startSupportOverlay })
+
+	srv := newFakeServer()
+	ctx := withSession(context.Background(), srv.io)
+	open := func(ch uint32, viewer string, viewOnly bool) {
+		b, _ := json.Marshal(desktopOpenReq{Channel: ch, Consent: "none", Viewer: viewer, ViewOnly: viewOnly})
+		if _, err := handleDesktopOpen(ctx, b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	open(1, "Anna", false)
+	open(2, "Jan", false)
+	open(3, "Ola", true)
+	ctl := func(ch uint32) string {
+		for _, v := range srv.presence(ch).Viewers {
+			if v.Control {
+				return v.Name
+			}
+		}
+		return ""
+	}
+	if ctl(1) != "Anna" || ctl(2) != "Anna" || ctl(3) != "Anna" {
+		t.Fatalf("pierwsza osoba nie steruje: %+v", srv.presence(2))
+	}
+	if p := srv.presence(2); len(p.Viewers) != 3 || !p.Viewers[1].You || !p.Viewers[2].ViewOnly {
+		t.Fatalf("lista połączonych: %+v", p)
+	}
+	key := func(ch uint32, code string) {
+		_ = srv.io.channels.get(ch).write([]byte(`{"t":"k","code":"` + code + `","d":true}`))
+	}
+	key(1, "KeyA")
+	key(2, "KeyB") // Jan nie steruje — pomijane
+	waitUntil(t, "klawisz Anny", func() bool { return h.count(`E:{"t":"k","code":"KeyA","d":true}`) == 1 })
+	time.Sleep(20 * time.Millisecond)
+	if h.count(`E:{"t":"k","code":"KeyB","d":true}`) != 0 {
+		t.Fatal("wejście osoby, która nie steruje, dotarło do komputera")
+	}
+	// podgląd nie może przejąć sterowania
+	_ = srv.io.channels.get(3).write([]byte(`{"t":"take"}`))
+	if ctl(1) != "Anna" {
+		t.Fatal("podgląd przejął sterowanie")
+	}
+	// Jan przejmuje: zwolnienie klawiszy Anny, od teraz działa jego wejście
+	_ = srv.io.channels.get(2).write([]byte(`{"t":"take"}`))
+	waitUntil(t, "Jan steruje", func() bool { return ctl(1) == "Jan" && ctl(3) == "Jan" })
+	waitUntil(t, "zwolnienie klawiszy Anny", func() bool { return h.count(`E:{"t":"rel"}`) == 1 })
+	key(2, "KeyC")
+	key(1, "KeyD")
+	waitUntil(t, "klawisz Jana", func() bool { return h.count(`E:{"t":"k","code":"KeyC","d":true}`) == 1 })
+	time.Sleep(20 * time.Millisecond)
+	if h.count(`E:{"t":"k","code":"KeyD","d":true}`) != 0 {
+		t.Fatal("Anna dalej steruje po przejęciu przez Jana")
+	}
+	// Jan wychodzi — sterowanie wraca do Anny (podgląd go nie dostaje)
+	srv.io.channels.remove(2).close()
+	waitUntil(t, "Anna steruje po wyjściu Jana", func() bool { return ctl(1) == "Anna" && ctl(3) == "Anna" })
+	srv.io.channels.remove(1).close()
+	srv.io.channels.remove(3).close()
+}

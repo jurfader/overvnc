@@ -104,6 +104,8 @@ W `hello` agent wysyła listę obsługiwanych poleceń. Serwer odrzuca polecenie
 
 **Kilka osób na jednym pulpicie** (od 0.18.0). Wszyscy oglądający ten sam komputer dzielą jeden proces pomocnika: ekran jest przechwytywany i kodowany raz, klatki trafiają do każdego kanału. Pomocnik dostaje zgodę na kolejną klatkę, gdy potwierdzi ją najwolniejszy oglądający (najwyżej 3 klatki w drodze). Dołączający od razu dostaje ostatnią informację `I`, a pomocnik wysyła pełną klatkę. Monitor, jakość i pierwszeństwo są wspólne (ostatnia zmiana wygrywa). Kursor jest dorysowywany, gdy chce go ktokolwiek, a schowek `C` trafia tylko do kanałów z `clipSync`. Ramka u użytkownika komputera pokazuje wszystkie połączone osoby. Ostatni wychodzący zamyka pomocnika.
 
+**Jedna osoba steruje.** Sterowanie dostaje pierwsza osoba w trybie sterowania. Wejście (`m`, `b`, `w`, `k`, `clip`, `sas`) pozostałych jest pomijane przez usługę agenta. `{"t":"take"}` („Przejmij sterowanie”) przekazuje je od razu, bez zgody sterującego; pomocnik dostaje `rel` i zwalnia to, co poprzednia osoba trzymała wciśnięte (`desktop.take` w dzienniku). Po wyjściu sterującego sterowanie dostaje najdawniej połączona osoba w trybie sterowania. Usługa wysyła każdemu `P` + JSON `{viewers:[{name, viewOnly, control, you}]}` po każdej zmianie.
+
 **Klatka** (`F`) to `seq u32, szer u16, wys u16, n u16` i `n` × (`x, y, w, h` u16, `długość` u32, JPEG). Wysyłane są tylko kafelki 128×128, które się zmieniły.
 
 **Tempo.** Najwyżej 2 klatki w drodze. Przeglądarka wysyła `{"t":"ack"}` po narysowaniu klatki, serwer zamienia to na ramkę ack dla agenta, a ten pozwala pomocnikowi wysłać następną klatkę (maks. ~15 kl./s).

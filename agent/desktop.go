@@ -70,6 +70,10 @@ type desktopGroup struct {
 
 	overlay      interface{ stop() }
 	overlayNames string
+
+	// sterowanie ma jedna osoba naraz; pozostali (w trybie sterowania) mogą je przejąć przyciskiem
+	controller uint32 // kanał sterującego (0 = nikt)
+	joins      uint64 // kolejność dołączania — sterowanie po wyjściu sterującego dostaje najdawniejszy
 }
 
 type desktopViewer struct {
@@ -82,6 +86,63 @@ type desktopViewer struct {
 	cursor  bool // chce kursora w obrazie (domyślnie tak — dopóki panel nie powie inaczej)
 	clip    bool
 	once    sync.Once
+
+	viewOnly bool // podgląd — nigdy nie steruje
+	seq      uint64
+}
+
+// presence — kto jest połączony i kto steruje; każdy oglądający dostaje własną wersję („you”).
+type presence struct {
+	Viewers []presenceViewer `json:"viewers"`
+}
+
+type presenceViewer struct {
+	Name     string `json:"name"`
+	ViewOnly bool   `json:"viewOnly,omitempty"`
+	Control  bool   `json:"control,omitempty"`
+	You      bool   `json:"you,omitempty"`
+}
+
+// sendPresenceLocked — 'P' do każdego oglądającego po dołączeniu, wyjściu albo przejęciu sterowania.
+func (g *desktopGroup) sendPresenceLocked() {
+	list := make([]*desktopViewer, 0, len(g.viewers))
+	for _, v := range g.viewers {
+		list = append(list, v)
+	}
+	slices.SortFunc(list, func(a, b *desktopViewer) int { return int(a.seq) - int(b.seq) })
+	for _, to := range list {
+		var p presence
+		for _, v := range list {
+			p.Viewers = append(p.Viewers, presenceViewer{Name: v.name, ViewOnly: v.viewOnly, Control: v.ch == g.controller, You: v == to})
+		}
+		b, _ := json.Marshal(p)
+		_ = to.sess.writeBinary(encodeFrame(frameData, to.ch, append([]byte{msgPresence}, b...)))
+	}
+}
+
+// setControllerLocked — nowy sterujący; to, co poprzedni trzymał wciśnięte, zostaje zwolnione.
+func (g *desktopGroup) setControllerLocked(ch uint32) {
+	if g.controller == ch {
+		return
+	}
+	if g.controller != 0 {
+		_ = g.toHelper(msgEvent, []byte(`{"t":"rel"}`))
+	}
+	g.controller = ch
+}
+
+// nextControllerLocked — po wyjściu sterującego: najdawniej połączona osoba w trybie sterowania.
+func (g *desktopGroup) nextControllerLocked() uint32 {
+	var best *desktopViewer
+	for _, v := range g.viewers {
+		if !v.viewOnly && (best == nil || v.seq < best.seq) {
+			best = v
+		}
+	}
+	if best == nil {
+		return 0
+	}
+	return best.ch
 }
 
 func (g *desktopGroup) toHelper(typ byte, p []byte) error {
@@ -154,7 +215,12 @@ func (g *desktopGroup) join(v *desktopViewer) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	v.acked = g.sent
+	g.joins++
+	v.seq = g.joins
 	g.viewers[v.ch] = v
+	if g.controller == 0 && !v.viewOnly {
+		g.controller = v.ch // pierwszy sterujący dostaje sterowanie od razu
+	}
 	if g.info != nil {
 		_ = v.sess.writeBinary(encodeFrame(frameData, v.ch, append([]byte{msgInfo}, g.info...)))
 	}
@@ -164,6 +230,7 @@ func (g *desktopGroup) join(v *desktopViewer) {
 	g.syncSettingsLocked()
 	g.syncOverlayLocked()
 	g.grantLocked()
+	g.sendPresenceLocked()
 }
 
 // leave usuwa oglądającego; ostatni zamyka pomocnika.
@@ -176,9 +243,13 @@ func (g *desktopGroup) leave(v *desktopViewer) {
 	delete(g.viewers, v.ch)
 	last := len(g.viewers) == 0
 	g.syncOverlayLocked() // ostatni wychodzi -> ramka znika od razu
+	if g.controller == v.ch {
+		g.setControllerLocked(g.nextControllerLocked())
+	}
 	if !last {
 		g.syncSettingsLocked()
 		g.grantLocked()
+		g.sendPresenceLocked()
 	}
 	g.mu.Unlock()
 	if last {
@@ -274,6 +345,28 @@ func (g *desktopGroup) run() {
 // write — zdarzenie z przeglądarki (JSON). Ctrl+Alt+Del wysyła sama usługa (Windows przyjmuje je
 // tylko od usługi działającej jako SYSTEM); ustawienia kursora i schowka są łączone dla wszystkich.
 func (v *desktopViewer) write(p []byte) error {
+	switch eventType(p) {
+	case "take":
+		// „Przejmij sterowanie” — od razu, bez czekania na zgodę sterującego (mógł odejść od komputera)
+		if !v.viewOnly {
+			g := v.g
+			g.mu.Lock()
+			if g.controller != v.ch {
+				g.setControllerLocked(v.ch)
+				g.sendPresenceLocked()
+			}
+			g.mu.Unlock()
+		}
+		return nil
+	case "m", "b", "w", "k", "clip", "sas":
+		g := v.g
+		g.mu.Lock()
+		allowed := g.controller == v.ch
+		g.mu.Unlock()
+		if !allowed {
+			return nil // steruje ktoś inny
+		}
+	}
 	if len(p) < 64 && bytes.Contains(p, []byte(`"sas"`)) {
 		var ev struct {
 			T string `json:"t"`
@@ -306,6 +399,22 @@ func (v *desktopViewer) write(p []byte) error {
 		}
 	}
 	return v.g.toHelper(msgEvent, p)
+}
+
+// eventType — pole "t" zdarzenia. Serwer zawsze stawia je na początku ({"t":"m",…}), więc zwykle
+// wystarczy odczyt prefiksu; inaczej pełne parsowanie.
+func eventType(p []byte) string {
+	const prefix = `{"t":"`
+	if bytes.HasPrefix(p, []byte(prefix)) {
+		if end := bytes.IndexByte(p[len(prefix):], '"'); end >= 0 {
+			return string(p[len(prefix) : len(prefix)+end])
+		}
+	}
+	var ev struct {
+		T string `json:"t"`
+	}
+	_ = json.Unmarshal(p, &ev)
+	return ev.T
 }
 
 // ack — przeglądarka narysowała klatkę.
@@ -357,7 +466,7 @@ func handleDesktopOpen(ctx context.Context, data json.RawMessage) (any, error) {
 	desktopGroups.mu.Unlock()
 
 	// użytkownik ma wiedzieć, że ktoś jest połączony — ramka przez całą sesję (tryby „z powiadomieniem” i „z pytaniem”)
-	v := &desktopViewer{g: g, ch: req.Channel, sess: sess, name: req.Viewer, overlay: req.Consent == "notify" || req.Consent == "ask", cursor: true}
+	v := &desktopViewer{g: g, ch: req.Channel, sess: sess, name: req.Viewer, overlay: req.Consent == "notify" || req.Consent == "ask", cursor: true, viewOnly: req.ViewOnly}
 	if err := sess.channels.add(req.Channel, v); err != nil {
 		if fresh {
 			g.shutdown()

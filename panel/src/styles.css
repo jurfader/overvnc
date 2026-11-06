@@ -949,6 +949,12 @@ textarea.pole.editor-area { font: 12.5px/1.55 var(--font-mono); height: 58vh; mi
   box-shadow: 0 6px 20px rgb(0 0 0 / 0.35); animation: fade 0.18s ease-out;
 }
 .desktop-local svg { width: 15px; height: 15px; flex-shrink: 0; }
+/* steruje ktoś inny — plakietka z przyciskiem (klikalna) */
+.desktop-take { pointer-events: auto; color: rgb(var(--ink)); border-color: rgb(var(--primary) / 0.35); padding: 4px 4px 4px 12px; }
+.desktop-take .btn { flex-shrink: 0; }
+/* inne osoby połączone z tym pulpitem */
+.desk-viewers { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgb(var(--ink-2)); }
+.desk-viewers svg { width: 14px; height: 14px; flex-shrink: 0; }
 /* pierwszeństwo dla osoby przy komputerze wyłączone — przekreślona dłoń */
 .btn.yield-off { position: relative; }
 .btn.yield-off::after { content: ''; position: absolute; left: 50%; top: 50%; width: 20px; height: 2px; border-radius: 1px; background: currentColor; transform: translate(-50%, -50%) rotate(-45deg); }

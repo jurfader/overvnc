@@ -245,6 +245,11 @@ func runDesktopHelper() int {
 					}
 				case "kf":
 					fullFrame()
+				case "rel":
+					// sterowanie przejęła inna osoba — zwalniamy to, co poprzednia trzymała wciśnięte
+					for _, e := range gate.releaseAll() {
+						_ = be.input(e, monitor())
+					}
 				case "clip":
 					if blocked() {
 						continue

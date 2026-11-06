@@ -122,7 +122,8 @@ test('pulpit: schowek komputera trafia tylko do sterującego; Ctrl+Alt+Del do ag
   await until(() => ctl.bin.length === 3);
   assert.equal(ctl.bin[2].subarray(1).toString(), 'zażółć ze schowka');
   ctl.ws.send(JSON.stringify({ t: 'sas' }));
-  await until(() => e.chan.data.some((d) => d.t === 'sas'));
+  ctl.ws.send(JSON.stringify({ t: 'take' }));
+  await until(() => e.chan.data.some((d) => d.t === 'sas') && e.chan.data.some((d) => d.t === 'take'));
   const log = (await e.s.app.inject({ url: '/api/audit?action=desktop.sas', cookies: e.c })).json();
   assert.ok(JSON.stringify(log).includes('desktop.sas'));
   ctl.ws.close();
@@ -135,6 +136,7 @@ test('pulpit: schowek komputera trafia tylko do sterującego; Ctrl+Alt+Del do ag
   await until(() => view.bin.length === 3);
   assert.equal(String.fromCharCode(view.bin[2][0]), 'F', 'schowek nie trafia do podglądu');
   view.ws.send(JSON.stringify({ t: 'sas' }));
+  view.ws.send(JSON.stringify({ t: 'take' }));
   await sleep(50);
   assert.equal(e.chan.data.length, before, 'Ctrl+Alt+Del zablokowane w podglądzie');
 });

@@ -38,8 +38,10 @@ const Event = z.discriminatedUnion('t', [
   z.object({ t: z.literal('clip'), text: z.string().min(1).max(100_000) }),
   // Ctrl+Alt+Del (Windows: wysyła usługa agenta przez SendSAS)
   z.object({ t: z.literal('sas') }),
+  // „Przejmij sterowanie” — przy kilku sterujących naraz steruje jedna osoba
+  z.object({ t: z.literal('take') }),
 ]);
-const INPUT_TYPES = new Set(['m', 'b', 'w', 'k', 'clip', 'sas']);
+const INPUT_TYPES = new Set(['m', 'b', 'w', 'k', 'clip', 'sas', 'take']);
 const IDLE_MS = 60 * 60 * 1000;
 const MAX_EVENT_BYTES = 512 * 1024;
 const MAX_BUFFERED = 16 * 1024 * 1024;
@@ -156,6 +158,7 @@ export async function desktopRoutes(app: FastifyInstance, ctx: Ctx) {
           if (viewOnly) return; // tryb podglądu wymuszany na serwerze, nie tylko w panelu
           touch();
           if (ev.t === 'sas') audit(db, actor, 'desktop.sas', id, {}, req.ip);
+          if (ev.t === 'take') audit(db, actor, 'desktop.take', id, {}, req.ip);
         }
         hub.sendChannelData(id, channel, Buffer.from(JSON.stringify(ev)));
       });
