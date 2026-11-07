@@ -132,6 +132,8 @@ export interface HubEvents {
   inventory: (agentId: string, inv: Record<string, any>) => void;
   /** nowa ocena zabezpieczeń (z inwentarzem albo osobno, co godzinę) */
   security: (agentId: string, sec: SecuritySummary) => void;
+  /** wiadomość od użytkownika komputera (czat z ikony w zasobniku) */
+  chat: (agentId: string, msg: { author: string; text: string; ts: number }) => void;
 }
 
 interface PanelState {
@@ -186,7 +188,7 @@ export class Hub {
   private pingTimer: NodeJS.Timeout;
   private closed = false;
   /** Słuchacze zdarzeń agentów (silnik alertów, aktualizacje, zadania); błąd słuchacza nie przerywa obsługi agenta. */
-  private listeners: { [K in keyof HubEvents]: HubEvents[K][] } = { metrics: [], connected: [], ready: [], inventory: [], security: [] };
+  private listeners: { [K in keyof HubEvents]: HubEvents[K][] } = { metrics: [], connected: [], ready: [], inventory: [], security: [], chat: [] };
 
   on<K extends keyof HubEvents>(name: K, fn: HubEvents[K]): void {
     this.listeners[name].push(fn);
@@ -291,6 +293,12 @@ export class Hub {
         // agent kończy pracę planowo (wyłączenie komputera, zatrzymanie usługi, aktualizacja)
         const reason = str((msg.data as { reason?: unknown } | undefined)?.reason);
         if (PLANNED_OFFLINE.has(reason)) conn.bye = reason;
+        break;
+      }
+      case 'chat': {
+        const d = (msg.data ?? {}) as { text?: unknown; author?: unknown; ts?: unknown };
+        const text = str(d.text).trim().slice(0, 4000);
+        if (text) this.notify('chat', agentId, { author: str(d.author).slice(0, 100) || 'użytkownik', text, ts: Number(d.ts) || Date.now() });
         break;
       }
       case 'audit': {

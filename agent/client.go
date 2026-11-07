@@ -32,6 +32,7 @@ func runAgent(ctx context.Context, cfgPath string, cfg *Config) {
 	go runUpdatesChecker(ctx)
 	go runPhoneWatcher(ctx) // kiosk: „Zdjęcia z telefonu” po podłączeniu telefonu
 	go runKioskSession(ctx) // kiosk: „Zakończ i usuń moje dane”
+	go runTrayService(ctx)  // zwykłe komputery: ikona w zasobniku z czatem
 	backoff := time.Second
 	for {
 		started := time.Now()
@@ -196,6 +197,16 @@ func session(parent context.Context, cfg *Config, cfgPath string) error {
 			fail(err)
 			return
 		}
+		serverOnline.Store(true)
+		trayStatusChanged()
+		defer func() {
+			serverOnline.Store(false)
+			trayStatusChanged()
+		}()
+		if err := flushChat(send); err != nil { // wiadomości napisane bez połączenia
+			fail(err)
+			return
+		}
 		mc := newMetricsCollector()
 		metricsT := time.NewTicker(metricsInterval)
 		invT := time.NewTicker(inventoryInterval)
@@ -224,6 +235,8 @@ func session(parent context.Context, cfg *Config, cfgPath string) error {
 				err = sendSecurity(ctx, send)
 			case ev := <-agentEvents:
 				err = send("audit", ev)
+			case <-chatNow:
+				err = flushChat(send)
 			}
 			if err != nil {
 				fail(err)

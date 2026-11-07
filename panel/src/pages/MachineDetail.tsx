@@ -1,8 +1,9 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { Activity, AlertTriangle, ArrowLeft, FileTerminal, ListChecks, MoreHorizontal, Building2, CloudDownload, Cog, MonitorSmartphone, FolderOpen, LayoutDashboard, LineChart, TerminalSquare, Clock, Cpu, HardDrive, Info, MemoryStick, Network, Package, Pencil, RefreshCw, Search, ShieldCheck, History, Trash2, Users } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowLeft, FileTerminal, ListChecks, MoreHorizontal, Building2, CloudDownload, Cog, MonitorSmartphone, MessageCircle, FolderOpen, LayoutDashboard, LineChart, TerminalSquare, Clock, Cpu, HardDrive, Info, MemoryStick, Network, Package, Pencil, RefreshCw, Search, ShieldCheck, History, Trash2, Users } from 'lucide-react';
 import { api, errorMessage, type Agent, type AgentDetail } from '../api.ts';
 import { Button, CardHead, Dropdown, ClientLabel, EmptyState, Meter, Modal, OsBadge, StatTile, Status, TagChip, toast } from '../components.tsx';
-import { useAlerts, useMe } from '../state.tsx';
+import { useAlerts, useChatUnread, useMe } from '../state.tsx';
+import { ChatView } from './remote/ChatView.tsx';
 import { NewJobModal } from './Jobs.tsx';
 import { alertValue, lasting } from './Alerts.tsx';
 import { OrganizeModal } from './organize.tsx';
@@ -21,14 +22,16 @@ import { ago, bytes, dateTime, duration, platformLabel, rate } from '../format.t
 const DesktopView = lazy(() => import('./remote/DesktopView.tsx').then((m) => ({ default: m.DesktopView })));
 const TerminalView = lazy(() => import('./remote/TerminalView.tsx').then((m) => ({ default: m.TerminalView })));
 
-export type DetailTab = 'overview' | 'monitoring' | 'security' | 'changes' | 'desktop' | 'terminal' | 'files' | 'processes' | 'services';
+export type DetailTab = 'overview' | 'monitoring' | 'security' | 'changes' | 'chat' | 'desktop' | 'terminal' | 'files' | 'processes' | 'services';
 
 // remote: zakładka wymaga uprawnienia do pracy zdalnej; Przegląd i Monitoring widzi każdy z dostępem do komputera
-const TABS: { key: DetailTab; label: string; icon: typeof Info; remote?: boolean }[] = [
+const TABS: { key: DetailTab; label: string; icon: typeof Info; remote?: boolean; noKiosk?: boolean }[] = [
   { key: 'overview', label: 'Przegląd', icon: LayoutDashboard },
   { key: 'monitoring', label: 'Monitoring', icon: LineChart },
   { key: 'security', label: 'Zabezpieczenia', icon: ShieldCheck },
   { key: 'changes', label: 'Historia zmian', icon: History },
+  // kiosk nie ma ikony w zasobniku (klient nie pisze do wsparcia)
+  { key: 'chat', label: 'Czat', icon: MessageCircle, noKiosk: true },
   { key: 'desktop', label: 'Pulpit', icon: MonitorSmartphone, remote: true },
   { key: 'terminal', label: 'Terminal', icon: TerminalSquare, remote: true },
   { key: 'files', label: 'Pliki', icon: FolderOpen, remote: true },
@@ -45,6 +48,7 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
   const [updating, setUpdating] = useState(false);
   const { can } = useMe();
   const { byAgent } = useAlerts();
+  const chatUnread = useChatUnread().get(id) ?? 0;
   const machineAlerts = byAgent.get(id) ?? [];
   const remote = can('agents.remote');
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -78,7 +82,7 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
   const inv = detail.inventory;
   const m = a.online ? a.metrics : null;
   const name = a.label || a.hostname;
-  const visibleTabs = TABS.filter((t) => !t.remote || remote);
+  const visibleTabs = TABS.filter((t) => (!t.remote || remote) && !(t.noKiosk && a.kind === 'kiosk'));
   const activeTab: DetailTab = visibleTabs.some((t) => t.key === tab) ? tab : 'overview';
 
   const canUpgrade = can('agents.manage') && a.online && a.capabilities.includes('update.check');
@@ -211,6 +215,7 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
           {visibleTabs.map((t) => (
             <a key={t.key} href={`#/m/${id}${t.key === 'overview' ? '' : '/' + t.key}`} className={`detail-tab ${activeTab === t.key ? 'on' : ''}`} title={t.label} aria-current={activeTab === t.key ? 'page' : undefined}>
               <t.icon /> <span className="tab-label">{t.label}</span>
+              {t.key === 'chat' && chatUnread > 0 && <span className="tab-count">{chatUnread}</span>}
             </a>
           ))}
         </nav>
@@ -219,6 +224,7 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
       {activeTab === 'monitoring' && <MonitoringView agent={a} />}
       {activeTab === 'security' && <SecurityView agent={a} facts={inv?.security} canRefresh={can('agents.refresh')} />}
       {activeTab === 'changes' && <ChangesView agent={a} />}
+      {activeTab === 'chat' && <ChatView agent={a} />}
       {activeTab === 'desktop' && (
         <Suspense fallback={<div className="center-page">Ładowanie…</div>}>
           <DesktopView agent={a} />

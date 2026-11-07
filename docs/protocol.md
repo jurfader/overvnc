@@ -52,6 +52,7 @@ Kanał otwiera serwer poleceniem (np. `term.open` z polem `channel`). Odbiorcę 
 | `inventory` | co 6 h | `Inventory` (system, sprzęt, dyski, sieć, oprogramowanie; od 0.19.0 także `security`) |
 | `kiosk.sharepass` `{password}` (polecenie) | 0.21.0 | hasło konta „pracownik” do udziału Pobrane; agent trzyma je zaszyfrowane DPAPI (klucz komputera) do zapisu — przy UWF zadaniem z restartami; serwer go nie zapisuje (`POST /api/agents/:id/share-password`) |
 | `bye` `{reason}` | przy planowanym końcu pracy (od 0.20.1) | `shutdown` (wyłączenie/restart systemu — sygnał menedżera usług), `stopped` (zatrzymanie usługi), `update` (aktualizacja agenta). Serwer zapisuje powód rozłączenia (`agents.offline_reason`, bez pożegnania: `lost`); reguła „Komputer offline” domyślnie pomija planowo wyłączone (próg 1 = zgłaszaj także je) |
+| `chat` | wiadomość z okna czatu w zasobniku (od 0.22.0) | `{ from: "user", author, text, ts }` — usługa trzyma kolejkę wiadomości napisanych bez połączenia (`chat.json`) i wysyła ją po połączeniu. Serwer zapisuje w `chat_messages`, ogłasza w panelu (`chat_message`) i wysyła Pushover |
 | `security` | co 1 h i po wyszukaniu aktualizacji (od 0.19.0) | `Security`: antywirus (Defender + produkty z Centrum zabezpieczeń), zapora, szyfrowanie (BitLocker/FileVault), aktualizacje (Windows Update / `softwareupdate`, wyszukiwane w tle co 12 h), macOS: Gatekeeper, SIP. Ocena (krytyczne / ostrzeżenia / informacje) jest na serwerze (`security.ts`); serwer porównuje też kolejne inwentarze i zapisuje historię zmian (`agent_changes`: programy, system, sprzęt, zabezpieczenia) |
 
 ### Żądania serwer → agent (z `id`)
@@ -101,6 +102,7 @@ W `hello` agent wysyła listę obsługiwanych poleceń. Serwer odrzuca polecenie
 | `script.run` `{runId, shell, script, timeoutSec, asUser}` | 0.13.0 | jednorazowy skrypt (zadania); wynik `{exitCode, output, truncated, timedOut, durationMs, user}`; wyjście: pierwsze 48 KB + ostatnie 16 KB. Skrypt działa niezależnie od połączenia; ten sam `runId` nie uruchamia go drugi raz. `asUser` (możliwość `script.user`): w sesji zalogowanego użytkownika |
 | `script.result` `{runId}` | 0.13.0 | wynik uruchomienia sprzed rozłączenia (czeka, jeśli trwa); wyniki trzymane 1 h; `unknown_run` po restarcie agenta |
 | `deploy.run` `{runId, url, name, size, sha256, dir, overwrite, shell, script, timeoutSec, asUser}` | 0.15.0 | wdrożenie pliku: pobranie z serwera (`GET /api/agent/packages/:id`, klucz agenta, wznawianie przez `Range`; serwer udostępnia plik tylko komputerom z oczekującym zadaniem), weryfikacja rozmiaru i SHA-256, zapis atomowy w `dir`, opcjonalny skrypt instalacji (ścieżka w `OVERVNC_FILE`); wynik jak `script.run`, odbiór po rozłączeniu przez `script.result` |
+| `chat.send` `{id, ts, author, text}` | 0.22.0 | wiadomość wsparcia do użytkownika komputera (okno czatu z ikony w zasobniku); wynik `{delivered}` — `false`, gdy nikt nie jest zalogowany (brak ikony w zasobniku; wiadomość czeka w historii i pokaże się po otwarciu czatu) |
 
 ### Pulpit zdalny
 
@@ -179,3 +181,17 @@ Każda odpowiedź błędu z API ma ten sam format:
 ### „Zakończ i usuń moje dane” (kiosk, od 0.20.0)
 
 Profil z `endButton`: usługa agenta co 5 s pilnuje procesu `overvnc-agent session-button` w sesji klienta (nigdy, gdy zalogowane jest konto z grupy Administratorzy, np. serwisowe) — przycisk w lewym dolnym rogu (okno warstwowe, zawsze na wierzchu, bez zabierania fokusu); kafelek w Start uruchamia `session-end`. Po potwierdzeniu (MessageBox Tak/Nie) proces klienta wysyła WM_CLOSE do okien przeglądarek, LibreOffice, Notatnika i folderów (przeglądarka przy zamknięciu czyści logowania), czeka do 10 s i pisze `cleanup` do kanału `\\.\pipe\OVERVNC-Kiosk` (dostęp: SYSTEM i zalogowani interaktywnie, bez klientów z sieci). Usługa usuwa zawartość Pobranych klienta, wysyła do serwera `{"type":"audit","data":{"action":"kiosk.session_end"}}` (serwer przyjmuje tylko znane akcje) i restartuje (`shutdown /r /t 5`; UWF odrzuca resztę zmian). Gdy trwają aktualizacje kiosku (`C:\Kiosk\Stan\aktualizacje.json`), tylko usuwa Pobrane.
+
+### Czat ze wsparciem — ikona w zasobniku (komputery, od 0.22.0)
+
+Na komputerach (nie kioskach) usługa agenta co 5 s pilnuje procesu `overvnc-agent tray` w sesji zalogowanego użytkownika. Ikona w zasobniku: menu „Napisz do wsparcia”, „Zakończ sesję zdalną” (gdy ktoś jest połączony z pulpitem — zielona kropka na ikonie), „Informacje o komputerze”. Ikona łączy się z usługą potokiem `\\.\pipe\OVERVNC-Tray` (SDDL: SYSTEM + użytkownicy interaktywni), wiadomości JSON w liniach:
+
+| kierunek | `t` | dane |
+|---|---|---|
+| ikona → usługa | `hello` | `{ user }` — usługa odsyła `history` (ostatnie 100 wiadomości) i `status` |
+| ikona → usługa | `chat` | `{ text }` — do historii i kolejki na serwer |
+| ikona → usługa | `end-remote` | kończy wszystkie sesje pulpitu zdalnego |
+| usługa → ikona | `chat` | `{ msg }` — nowa wiadomość (od wsparcia: dymek w zasobniku i otwarcie okna czatu) |
+| usługa → ikona | `status` | `{ online, remote: string[], computer }` |
+
+Okno czatu to lokalny serwer na `127.0.0.1` (losowy port, token w adresie) otwierany w przeglądarce w trybie aplikacji. Żądanie serwer → agent `chat.send {id, ts, author, text}` doręcza wiadomość wsparcia (powtórka z tym samym `id` jest pomijana); wiadomości do komputera offline czekają w bazie i są doręczane po `hello`. API panelu: `GET/POST /api/agents/:id/chat`, `POST /api/agents/:id/chat/read`, `GET /api/chat/unread`; pisanie wymaga uprawnienia `agents.remote`, czytanie — `agents.view`. Zdarzenia panelu: `chat_message`, `chat_read`.

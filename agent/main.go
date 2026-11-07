@@ -124,6 +124,10 @@ func main() {
 		// kiosk: to samo z kafelka w menu Start
 		os.Exit(runSessionEnd())
 
+	case "tray":
+		// ikona OVERVNC w zasobniku z czatem ze wsparciem (uruchamia ją usługa w sesji użytkownika)
+		os.Exit(runTray())
+
 	case "phone":
 		// „Zdjęcia z telefonu” — aplikacja klienta kiosku (uruchamia ją klient z menu Start albo agent po podłączeniu telefonu)
 		os.Exit(runPhoneApp(fs.Args()))

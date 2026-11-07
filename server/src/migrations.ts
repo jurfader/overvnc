@@ -341,4 +341,20 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE agents ADD COLUMN share_mode TEXT NOT NULL DEFAULT 'off';   -- off | read | delete
   ALTER TABLE agents ADD COLUMN share_allow TEXT NOT NULL DEFAULT '';     -- adresy/sieci; puste = sieć lokalna
   `,
+
+  // 16 — czat użytkownika komputera ze wsparciem (ikona w zasobniku) (v0.22.0)
+  `
+  CREATE TABLE chat_messages (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id     TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    ts           INTEGER NOT NULL,
+    direction    TEXT NOT NULL,      -- in (od użytkownika komputera) | out (od wsparcia)
+    author       TEXT NOT NULL,
+    user_id      INTEGER,            -- out: konto w panelu
+    text         TEXT NOT NULL,
+    delivered_at INTEGER,            -- out: doręczone do okna na komputerze
+    read_at      INTEGER             -- in: przeczytane w panelu
+  );
+  CREATE INDEX chat_agent ON chat_messages(agent_id, id DESC);
+  `,
 ];

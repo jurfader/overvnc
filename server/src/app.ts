@@ -34,6 +34,8 @@ import { JobRunner } from './jobs.ts';
 import { Scheduler } from './schedules.ts';
 import { scriptRoutes } from './routes/scripts.ts';
 import { packageRoutes } from './routes/packages.ts';
+import { chatRoutes } from './routes/chat.ts';
+import { ChatService } from './chat.ts';
 import { loadOrCreateKey } from './crypto.ts';
 
 const CSP = [
@@ -65,6 +67,7 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
   installProfilePush(db, hub, (msg) => app.log.warn(msg));
   hub.on('connected', (id) => alerts.onConnected(id));
   const jobs = new JobRunner(db, hub, (msg) => app.log.warn(msg));
+  const chat = new ChatService(db, hub, notifier);
   const ctx: Ctx = {
     config,
     db,
@@ -74,6 +77,7 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
     metrics,
     alerts,
     notifier,
+    chat,
     jobs,
     scheduler: new Scheduler(db, hub, jobs, (msg) => app.log.warn(msg)),
     limits: {
@@ -149,6 +153,7 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
   await jobRoutes(app, ctx);
   await scriptRoutes(app, ctx);
   await packageRoutes(app, ctx);
+  await chatRoutes(app, ctx);
 
   if (config.panelDir && existsSync(config.panelDir)) {
     // bez wildcard:false — pliki są serwowane dynamicznie, więc przebudowa panelu nie wymaga restartu

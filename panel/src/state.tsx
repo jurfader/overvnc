@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { api, type AlertItem, type Client, type Me, type Permission, type Tag } from './api.ts';
+import { api, type AlertItem, type ChatMessage, type Client, type Me, type Permission, type Tag } from './api.ts';
 
 // ---------- zalogowane konto ----------
 
@@ -131,4 +131,52 @@ export function useAlerts(): AlertsState {
   const ctx = useContext(AlertsContext);
   if (!ctx) throw new Error('useAlerts poza AlertsProvider');
   return ctx;
+}
+
+// ---------- czat (nieprzeczytane wiadomości od użytkowników komputerów) ----------
+
+/** Zdarzenie czatu z WebSocketu panelu (App przekazuje je przez window). */
+export interface ChatEvent {
+  type: 'chat_message' | 'chat_read';
+  id: string;
+  data?: ChatMessage;
+}
+
+export function chatEvent(e: ChatEvent): void {
+  window.dispatchEvent(new CustomEvent<ChatEvent>('overvnc:chat', { detail: e }));
+}
+
+const ChatContext = createContext<Map<string, number>>(new Map());
+
+export function ChatProvider({ children }: { children: ReactNode }) {
+  const [unread, setUnread] = useState<Map<string, number>>(new Map());
+  const reload = useCallback(async () => {
+    const list = await api.chatUnread().catch(() => null);
+    if (list) setUnread(new Map(list.map((u) => [u.agentId, u.count])));
+  }, []);
+  useEffect(() => {
+    void reload();
+    const seen = new Set<number>();
+    const on = (ev: Event) => {
+      const e = (ev as CustomEvent<ChatEvent>).detail;
+      if (e.type === 'chat_read') return setUnread((m) => (m.has(e.id) ? new Map([...m].filter(([k]) => k !== e.id)) : m));
+      const msg = e.data;
+      if (!msg || msg.direction !== 'in' || msg.readAt || seen.has(msg.id)) return;
+      seen.add(msg.id);
+      setUnread((m) => new Map(m).set(e.id, (m.get(e.id) ?? 0) + 1));
+    };
+    const onReload = () => void reload();
+    window.addEventListener('overvnc:chat', on);
+    window.addEventListener('overvnc:alerts-reload', onReload);
+    return () => {
+      window.removeEventListener('overvnc:chat', on);
+      window.removeEventListener('overvnc:alerts-reload', onReload);
+    };
+  }, [reload]);
+  return <ChatContext.Provider value={unread}>{children}</ChatContext.Provider>;
+}
+
+/** Liczba nieprzeczytanych wiadomości czatu dla każdego komputera. */
+export function useChatUnread(): Map<string, number> {
+  return useContext(ChatContext);
 }

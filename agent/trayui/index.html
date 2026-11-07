@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Wsparcie techniczne</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+      </div>
+      <div class="titles">
+        <h1>Wsparcie techniczne</h1>
+        <div id="status" class="status"><span class="dot"></span><span id="status-text">Łączenie…</span></div>
+      </div>
+    </header>
+
+    <div id="remote" class="remote" hidden>
+      <div>
+        <strong>Ktoś pomaga Ci zdalnie</strong>
+        <div id="remote-names" class="muted"></div>
+      </div>
+      <button id="end-remote" class="btn ghost">Zakończ</button>
+    </div>
+
+    <main id="messages" class="messages" aria-live="polite">
+      <div id="empty" class="empty">
+        <p><strong>Masz problem z komputerem?</strong></p>
+        <p class="muted">Napisz, co się dzieje — odpowiemy tutaj. Jeśli trzeba, połączymy się z Twoim komputerem (zobaczysz to po kolorowej ramce na ekranie).</p>
+      </div>
+    </main>
+
+    <form id="form" class="composer">
+      <textarea id="text" rows="2" maxlength="4000" placeholder="Napisz wiadomość…" aria-label="Wiadomość"></textarea>
+      <button id="send" class="btn primary" type="submit" aria-label="Wyślij">
+        <svg viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" /></svg>
+      </button>
+    </form>
+    <footer id="computer" class="foot muted"></footer>
+    <script src="app.js"></script>
+  </body>
+</html>

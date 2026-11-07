@@ -76,6 +76,18 @@ export interface NotificationSettings {
 }
 
 
+/** Wiadomość czatu: in — od użytkownika komputera, out — od wsparcia. */
+export interface ChatMessage {
+  id: number;
+  agentId: string;
+  ts: number;
+  direction: 'in' | 'out';
+  author: string;
+  text: string;
+  deliveredAt: number | null;
+  readAt: number | null;
+}
+
 export interface Agent {
   id: string;
   hostname: string;
@@ -547,6 +559,12 @@ export const api = {
   screenshotUrl: (id: string, w = 640) => `/api/agents/${id}/screenshot?w=${w}`,
   kioskAction: (id: string, action: KioskAction) => request<{ status: string; restarts?: number }>('POST', `/api/agents/${id}/kiosk/${action}`, {}),
   screenMessage: (id: string, body: { text: string; title?: string; seconds?: number }) => request<Ok>('POST', `/api/agents/${id}/message`, body),
+
+  // czat z użytkownikiem komputera (ikona w zasobniku)
+  chat: (id: string, before?: number) => request<{ items: ChatMessage[] }>('GET', `/api/agents/${id}/chat${before ? `?before=${before}` : ''}`),
+  sendChat: (id: string, text: string) => request<ChatMessage>('POST', `/api/agents/${id}/chat`, { text }),
+  readChat: (id: string) => request<Ok>('POST', `/api/agents/${id}/chat/read`, {}),
+  chatUnread: () => request<{ agentId: string; count: number; lastTs: number }[]>('GET', '/api/chat/unread'),
 
   // alerty i powiadomienia
   alerts: (state: 'open' | 'all', agentId?: string) =>

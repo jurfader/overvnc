@@ -624,13 +624,19 @@ func fileExists(p string) bool {
 }
 
 func phoneOpenWindow(url string) error {
+	return openAppWindow(url, "phone-browser", "--start-maximized")
+}
+
+// openAppWindow — okno przeglądarki w trybie aplikacji (bez paska adresu i kart), z osobnym profilem —
+// nie miesza się z przeglądarką użytkownika.
+func openAppWindow(url, profileName string, extra ...string) error {
 	exe := phoneBrowser()
 	if exe == "" {
 		return exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", url).Start()
 	}
-	profile := filepath.Join(os.Getenv("LOCALAPPDATA"), "OVERVNC", "phone-browser")
-	// tryb aplikacji: okno bez paska adresu i kart; osobny profil — okno nie miesza się z przeglądarką klienta
-	return exec.Command(exe, "--app="+url, "--start-maximized", "--no-first-run", "--no-default-browser-check", "--user-data-dir="+profile).Start()
+	profile := filepath.Join(os.Getenv("LOCALAPPDATA"), "OVERVNC", profileName)
+	args := append([]string{"--app=" + url, "--no-first-run", "--no-default-browser-check", "--user-data-dir=" + profile}, extra...)
+	return exec.Command(exe, args...).Start()
 }
 
 func phoneOpenFolder(dir string) error { return exec.Command("explorer.exe", dir).Start() }

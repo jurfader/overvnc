@@ -117,6 +117,13 @@ func (g *desktopGroup) sendPresenceLocked() {
 		list = append(list, v)
 	}
 	slices.SortFunc(list, func(a, b *desktopViewer) int { return int(a.seq) - int(b.seq) })
+	names := make([]string, 0, len(list))
+	for _, v := range list {
+		if !slices.Contains(names, v.name) {
+			names = append(names, v.name)
+		}
+	}
+	setRemoteViewers(names) // ikona w zasobniku: kto jest połączony
 	for _, to := range list {
 		var p presence
 		for _, v := range list {
@@ -260,7 +267,31 @@ func (g *desktopGroup) leave(v *desktopViewer) {
 	}
 	g.mu.Unlock()
 	if last {
+		setRemoteViewers(nil)
 		g.shutdown()
+	}
+}
+
+// endDesktopSessions — użytkownik komputera kończy zdalne sesje (ikona w zasobniku): kanały zamknięte
+// z informacją dla panelu.
+func endDesktopSessions(reason string) {
+	desktopGroups.mu.Lock()
+	g := desktopGroups.g
+	desktopGroups.mu.Unlock()
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	viewers := make([]*desktopViewer, 0, len(g.viewers))
+	for _, v := range g.viewers {
+		viewers = append(viewers, v)
+	}
+	g.mu.Unlock()
+	for _, v := range viewers {
+		if v.sess.channels.remove(v.ch) != nil {
+			_ = v.sess.event("channel.closed", map[string]any{"channel": v.ch, "exitCode": 0, "error": reason})
+		}
+		v.close()
 	}
 }
 

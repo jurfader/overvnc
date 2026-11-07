@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { BellRing, Building2, ChevronRight, LayoutGrid, ListChecks, CloudDownload, LogOut, Menu, Monitor, Moon, PlusCircle, ScrollText, Store, Sun, UserCog, Users, X, type LucideIcon } from 'lucide-react';
-import { api, type Agent, type Me, type Permission } from './api.ts';
+import { api, type Agent, type ChatMessage, type Me, type Permission } from './api.ts';
 import { useLiveEvents, type LiveEvent } from './live.ts';
-import { applyTheme, readTheme, Toasts, type Theme } from './components.tsx';
-import { AlertsProvider, alertEvent, MeProvider, OrgProvider, orgChanged, useAlerts } from './state.tsx';
+import { applyTheme, readTheme, toast, Toasts, type Theme } from './components.tsx';
+import { AlertsProvider, alertEvent, ChatProvider, chatEvent, MeProvider, OrgProvider, orgChanged, useAlerts } from './state.tsx';
 import { Login } from './pages/Login.tsx';
 import { Setup } from './pages/Setup.tsx';
 import { Machines } from './pages/Machines.tsx';
@@ -76,7 +76,9 @@ export function App() {
       <MeProvider me={me} reloadMe={reloadMe}>
         <OrgProvider>
           <AlertsProvider>
-            <Shell me={me} theme={theme} onToggleTheme={toggleTheme} onLogout={logout} reloadMe={reloadMe} />
+            <ChatProvider>
+              <Shell me={me} theme={theme} onToggleTheme={toggleTheme} onLogout={logout} reloadMe={reloadMe} />
+            </ChatProvider>
           </AlertsProvider>
         </OrgProvider>
       </MeProvider>
@@ -106,6 +108,8 @@ interface NavItem {
 
 function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme: Theme; onToggleTheme: () => void; onLogout: () => void; reloadMe: () => Promise<void> }) {
   const [agents, setAgents] = useState<Map<string, Agent>>(new Map());
+  const agentsRef = useRef(agents);
+  agentsRef.current = agents;
   const [menuOpen, setMenuOpen] = useState(false);
   const { path, query } = useHashRoute();
   const can = (p: Permission) => me.permissions.includes(p);
@@ -125,6 +129,16 @@ function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme
     if (e.type === 'alert_opened' || e.type === 'alert_resolved' || e.type === 'alert_updated') return alertEvent({ type: e.type, data: e.data });
     if (!e.id) return;
     const id = e.id;
+    if (e.type === 'chat_message' || e.type === 'chat_read') {
+      chatEvent({ type: e.type, id, data: e.data });
+      // wiadomość od użytkownika komputera — powiadomienie, chyba że czat tego komputera jest otwarty
+      const m = e.data as ChatMessage | undefined;
+      if (e.type === 'chat_message' && m?.direction === 'in' && !m.readAt && location.hash !== `#/m/${id}/chat`) {
+        const a = agentsRef.current.get(id);
+        toast(`${a ? a.label || a.hostname : 'Komputer'} · ${m.author}: ${m.text.length > 90 ? m.text.slice(0, 90) + '…' : m.text}`, 'chat', `#/m/${id}/chat`);
+      }
+      return;
+    }
     setAgents((prev) => {
       const next = new Map(prev);
       const cur = next.get(id);
@@ -203,7 +217,7 @@ function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme
     .map((g) => ({ ...g, items: g.items.filter((i) => can(i.perm) && (!i.global || me.allClients)) }))
     .filter((g) => g.items.length > 0);
 
-  const detail = /^\/m\/([0-9a-f-]{36})(?:\/(monitoring|security|changes|desktop|terminal|files|processes|services))?$/.exec(path);
+  const detail = /^\/m\/([0-9a-f-]{36})(?:\/(monitoring|security|changes|chat|desktop|terminal|files|processes|services))?$/.exec(path);
   let page;
   if (detail) page = <MachineDetail key={detail[1]} id={detail[1]} live={agents.get(detail[1])} tab={(detail[2] as DetailTab) ?? 'overview'} filePath={query.get('path')} />;
   else if (path === '/clients') page = <Clients />;

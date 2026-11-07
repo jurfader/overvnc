@@ -1,3 +1,4 @@
+import type { ChatService } from './chat.ts';
 import type { Config } from './config.ts';
 import type { Db } from './db.ts';
 import type { Hub } from './hub.ts';
@@ -25,6 +26,7 @@ export interface Ctx {
   alerts: AlertEngine;
   /** Powiadomienia push (Pushover). */
   notifier: Notifier;
+  chat: ChatService;
   /** Zadania w tle (skrypty i akcje na wielu komputerach). */
   jobs: JobRunner;
   /** Harmonogram zadań (dni tygodnia + godzina). */

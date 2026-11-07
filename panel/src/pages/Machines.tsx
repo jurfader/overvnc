@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { AlertTriangle, Building2, FileTerminal, FilterX, MessageSquareText, Monitor, PlusCircle, Power, RotateCw, Search, Store, Tag as TagIcon, Wifi, X } from 'lucide-react';
+import { AlertTriangle, Building2, FileTerminal, FilterX, MessageCircle, MessageSquareText, Monitor, PlusCircle, Power, RotateCw, Search, Store, Tag as TagIcon, Wifi, X } from 'lucide-react';
 import type { Agent, AgentKind } from '../api.ts';
 import { Badge, Button, Checkbox, ClientLabel, EmptyState, Meter, OsBadge, osIcon, StatTile, Status, TagChip } from '../components.tsx';
 import { ago, bytes, platformLabel, plural } from '../format.ts';
-import { useAlerts, useMe, useOrg } from '../state.tsx';
+import { useAlerts, useChatUnread, useMe, useOrg } from '../state.tsx';
 import { BulkModal, type BulkMode } from './organize.tsx';
 import { NewJobModal } from './Jobs.tsx';
 import { SecurityShield } from './protection.tsx';
@@ -19,6 +19,7 @@ export function Machines({ agents, initialClient, kind = 'computer' }: { agents:
   const { can, me } = useMe();
   const { clients, tags } = useOrg();
   const { byAgent } = useAlerts();
+  const chatUnread = useChatUnread();
   /** Komputer wymaga uwagi, gdy ma otwarte alerty (wg reguł z zakładki Alerty). */
   const alerts = (a: Agent): string[] => (byAgent.get(a.id) ?? []).map((x) => x.title);
   const [q, setQ] = useState('');
@@ -274,6 +275,11 @@ export function Machines({ agents, initialClient, kind = 'computer' }: { agents:
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'inherit' }}>
                         <Status online={a.online} reason={a.offlineReason} />
                         <SecurityShield security={a.security} />
+                        {(chatUnread.get(a.id) ?? 0) > 0 && (
+                          <a href={`#/m/${a.id}/chat`} className="chat-pill" onClick={(e) => e.stopPropagation()} title="Nieprzeczytane wiadomości od użytkownika">
+                            <MessageCircle /> {chatUnread.get(a.id)}
+                          </a>
+                        )}
                         {warn.length > 0 && (
                           <span className="only-desktop">
                             <Badge variant="danger">

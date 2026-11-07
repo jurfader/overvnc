@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from 'react';
-import { AlertCircle, CheckCircle2, Copy, Download, Laptop, Monitor, Server, type LucideIcon } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Copy, Download, Laptop, MessageCircle, Monitor, Server, type LucideIcon } from 'lucide-react';
 import { osLabel } from './format.ts';
 
 // ---------- przycisk ----------
@@ -153,11 +153,13 @@ export function Modal({ open, onClose, children, wide }: { open: boolean; onClos
 interface ToastMsg {
   id: number;
   text: string;
-  kind: 'ok' | 'err';
+  kind: 'ok' | 'err' | 'chat';
+  /** kliknięcie przenosi do widoku (np. czat komputera) */
+  href?: string;
 }
 
-export function toast(text: string, kind: 'ok' | 'err' = 'ok'): void {
-  window.dispatchEvent(new CustomEvent('overvnc:toast', { detail: { text, kind } }));
+export function toast(text: string, kind: 'ok' | 'err' | 'chat' = 'ok', href?: string): void {
+  window.dispatchEvent(new CustomEvent('overvnc:toast', { detail: { text, kind, href } }));
 }
 
 export function Toasts() {
@@ -165,10 +167,10 @@ export function Toasts() {
   useEffect(() => {
     let seq = 0;
     const on = (e: Event) => {
-      const { text, kind } = (e as CustomEvent).detail;
+      const { text, kind, href } = (e as CustomEvent).detail;
       const id = ++seq;
-      setItems((xs) => [...xs, { id, text, kind }]);
-      setTimeout(() => setItems((xs) => xs.filter((x) => x.id !== id)), 3500);
+      setItems((xs) => [...xs, { id, text, kind, href }]);
+      setTimeout(() => setItems((xs) => xs.filter((x) => x.id !== id)), kind === 'chat' ? 9000 : 3500);
     };
     window.addEventListener('overvnc:toast', on);
     return () => window.removeEventListener('overvnc:toast', on);
@@ -176,10 +178,17 @@ export function Toasts() {
   return (
     <div className="toasts" aria-live="polite">
       {items.map((t) => (
-        <div key={t.id} className={`toast ${t.kind} anim-rise`}>
-          {t.kind === 'ok' ? <CheckCircle2 /> : <AlertCircle />}
-          {t.text}
-        </div>
+        t.href ? (
+          <a key={t.id} href={t.href} className={`toast ${t.kind} anim-rise`} onClick={() => setItems((xs) => xs.filter((x) => x.id !== t.id))}>
+            <MessageCircle />
+            <span className="toast-text">{t.text}</span>
+          </a>
+        ) : (
+          <div key={t.id} className={`toast ${t.kind} anim-rise`}>
+            {t.kind === 'ok' ? <CheckCircle2 /> : <AlertCircle />}
+            <span className="toast-text">{t.text}</span>
+          </div>
+        )
       ))}
     </div>
   );
