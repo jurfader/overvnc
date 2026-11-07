@@ -5,7 +5,7 @@ import { audit, tx } from '../db.ts';
 import { randomToken, sha256 } from '../crypto.ts';
 import { HttpError, parse } from '../errors.ts';
 import { actorOf, requireUser } from '../auth.ts';
-import { assertAgentAccess, assertPlacement } from '../scope.ts';
+import { assertAgentAccess, assertPlacement, scopeSql } from '../scope.ts';
 
 const IdParams = z.object({ id: z.uuid() });
 const TagIds = z.array(z.number().int().positive()).max(100);
@@ -56,6 +56,43 @@ export async function agentRoutes(app: FastifyInstance, ctx: Ctx) {
     const { id } = access(req);
     const inv = db.prepare('SELECT inventory_json FROM agents WHERE id = ?').get(id) as { inventory_json: string | null };
     return { ...hub.summary(id)!, inventory: inv.inventory_json ? JSON.parse(inv.inventory_json) : null };
+  });
+
+  // historia zmian: programy, system, sprzęt, zabezpieczenia (porównanie kolejnych inwentarzy)
+  const ChangesQuery = z.object({
+    kind: z.enum(['software', 'os', 'hardware', 'security', 'system']).optional(),
+    before: z.coerce.number().int().positive().optional(), // id ostatniego wpisu z poprzedniej strony
+    limit: z.coerce.number().int().min(1).max(200).default(100),
+  });
+  const CHANGE_COLS = 'x.id, x.agent_id AS agentId, x.ts, x.kind, x.title, x.detail';
+  app.get('/api/agents/:id/changes', view, async (req) => {
+    const { id } = access(req);
+    const q = parse(ChangesQuery, req.query);
+    const rows = db
+      .prepare(
+        `SELECT ${CHANGE_COLS} FROM agent_changes x WHERE x.agent_id = ?${q.kind ? ' AND x.kind = ?' : ''}${q.before ? ' AND x.id < ?' : ''} ORDER BY x.id DESC LIMIT ?`,
+      )
+      .all(...([id, q.kind, q.before, q.limit].filter((v) => v !== undefined) as (string | number)[]));
+    return { items: rows };
+  });
+
+  // zmiany na wszystkich widocznych komputerach (np. „gdzie zainstalowano X”)
+  const AllChangesQuery = ChangesQuery.extend({ q: z.string().trim().max(100).optional() });
+  app.get('/api/changes', view, async (req) => {
+    const q = parse(AllChangesQuery, req.query);
+    const where = scopeSql(req.user!, 'a.client_id');
+    const conds = [where.sql];
+    const params: (string | number)[] = [...where.params];
+    if (q.kind) conds.push('x.kind = ?'), params.push(q.kind);
+    if (q.before) conds.push('x.id < ?'), params.push(q.before);
+    if (q.q) conds.push("(x.title LIKE ? ESCAPE '\\' OR x.detail LIKE ? ESCAPE '\\')"), params.push(...Array(2).fill(`%${q.q.replace(/[\\%_]/g, (m) => '\\' + m)}%`));
+    const rows = db
+      .prepare(
+        `SELECT ${CHANGE_COLS}, a.hostname, a.label, c.name AS clientName FROM agent_changes x JOIN agents a ON a.id = x.agent_id LEFT JOIN clients c ON c.id = a.client_id
+         WHERE ${conds.join(' AND ')} ORDER BY x.id DESC LIMIT ?`,
+      )
+      .all(...params, q.limit);
+    return { items: rows };
   });
 
   // historia metryk do wykresów monitoringu

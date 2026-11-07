@@ -60,6 +60,7 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
   const alerts = new AlertEngine(db, hub, notifier);
   hub.on('metrics', (id, m) => alerts.onMetrics(id, m));
   hub.on('inventory', (id, inv) => alerts.onInventory(id, inv));
+  hub.on('security', (id, sec) => alerts.onSecurity(id, sec));
   hub.on('connected', (id) => alerts.onConnected(id));
   const jobs = new JobRunner(db, hub, (msg) => app.log.warn(msg));
   const ctx: Ctx = {

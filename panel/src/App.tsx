@@ -195,7 +195,7 @@ function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme
     .map((g) => ({ ...g, items: g.items.filter((i) => can(i.perm) && (!i.global || me.allClients)) }))
     .filter((g) => g.items.length > 0);
 
-  const detail = /^\/m\/([0-9a-f-]{36})(?:\/(monitoring|desktop|terminal|files|processes|services))?$/.exec(path);
+  const detail = /^\/m\/([0-9a-f-]{36})(?:\/(monitoring|security|changes|desktop|terminal|files|processes|services))?$/.exec(path);
   let page;
   if (detail) page = <MachineDetail key={detail[1]} id={detail[1]} live={agents.get(detail[1])} tab={(detail[2] as DetailTab) ?? 'overview'} filePath={query.get('path')} />;
   else if (path === '/clients') page = <Clients />;

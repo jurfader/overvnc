@@ -25,6 +25,7 @@ const RuleBody = z
   })
   .refine((r) => r.kind === 'offline' || r.threshold >= 1, { message: 'Podaj próg (1–100).', path: ['threshold'] })
   .refine((r) => r.kind !== 'license' || r.threshold <= 90, { message: 'Dla licencji podaj liczbę dni (1–90).', path: ['threshold'] })
+  .refine((r) => r.kind !== 'security' || r.threshold === 1 || r.threshold === 2, { message: 'Wybierz: tylko krytyczne (2) albo krytyczne i ostrzeżenia (1).', path: ['threshold'] })
   .refine((r) => r.kind !== 'offline' || r.durationMin >= 1, { message: 'Dla reguły „offline” podaj czas co najmniej 1 min.', path: ['durationMin'] });
 const PushoverBody = z.object({
   // puste pola = bez zmian; clear = usuń konfigurację

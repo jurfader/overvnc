@@ -1,11 +1,12 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { Activity, AlertTriangle, ArrowLeft, FileTerminal, ListChecks, MoreHorizontal, Building2, CloudDownload, Cog, MonitorSmartphone, FolderOpen, LayoutDashboard, LineChart, TerminalSquare, Clock, Cpu, HardDrive, Info, MemoryStick, Network, Package, Pencil, RefreshCw, Search, Trash2, Users } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowLeft, FileTerminal, ListChecks, MoreHorizontal, Building2, CloudDownload, Cog, MonitorSmartphone, FolderOpen, LayoutDashboard, LineChart, TerminalSquare, Clock, Cpu, HardDrive, Info, MemoryStick, Network, Package, Pencil, RefreshCw, Search, ShieldCheck, History, Trash2, Users } from 'lucide-react';
 import { api, errorMessage, type Agent, type AgentDetail } from '../api.ts';
 import { Button, CardHead, Dropdown, ClientLabel, EmptyState, Meter, Modal, OsBadge, StatTile, Status, TagChip, toast } from '../components.tsx';
 import { useAlerts, useMe } from '../state.tsx';
 import { NewJobModal } from './Jobs.tsx';
 import { alertValue, lasting } from './Alerts.tsx';
 import { OrganizeModal } from './organize.tsx';
+import { ChangesView, SecurityShield, SecurityView } from './protection.tsx';
 import { MonitoringView } from './remote/MonitoringView.tsx';
 import { KioskCard } from './remote/KioskCard.tsx';
 import { WindowsCard } from './remote/WindowsCard.tsx';
@@ -19,12 +20,14 @@ import { ago, bytes, dateTime, duration, platformLabel, rate } from '../format.t
 const DesktopView = lazy(() => import('./remote/DesktopView.tsx').then((m) => ({ default: m.DesktopView })));
 const TerminalView = lazy(() => import('./remote/TerminalView.tsx').then((m) => ({ default: m.TerminalView })));
 
-export type DetailTab = 'overview' | 'monitoring' | 'desktop' | 'terminal' | 'files' | 'processes' | 'services';
+export type DetailTab = 'overview' | 'monitoring' | 'security' | 'changes' | 'desktop' | 'terminal' | 'files' | 'processes' | 'services';
 
 // remote: zakładka wymaga uprawnienia do pracy zdalnej; Przegląd i Monitoring widzi każdy z dostępem do komputera
 const TABS: { key: DetailTab; label: string; icon: typeof Info; remote?: boolean }[] = [
   { key: 'overview', label: 'Przegląd', icon: LayoutDashboard },
   { key: 'monitoring', label: 'Monitoring', icon: LineChart },
+  { key: 'security', label: 'Zabezpieczenia', icon: ShieldCheck },
+  { key: 'changes', label: 'Historia zmian', icon: History },
   { key: 'desktop', label: 'Pulpit', icon: MonitorSmartphone, remote: true },
   { key: 'terminal', label: 'Terminal', icon: TerminalSquare, remote: true },
   { key: 'files', label: 'Pliki', icon: FolderOpen, remote: true },
@@ -111,6 +114,11 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
           </a>
           <h1>
             {name} <Status online={a.online} />
+            {a.security && (a.security.level === 'critical' || a.security.level === 'warning') && (
+              <a href={`#/m/${id}/security`} className="sec-link" title="Zobacz zabezpieczenia">
+                <SecurityShield security={a.security} />
+              </a>
+            )}
           </h1>
           <div className="sub">
             {a.label && (
@@ -208,6 +216,8 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
       )}
 
       {activeTab === 'monitoring' && <MonitoringView agent={a} />}
+      {activeTab === 'security' && <SecurityView agent={a} facts={inv?.security} canRefresh={can('agents.refresh')} />}
+      {activeTab === 'changes' && <ChangesView agent={a} />}
       {activeTab === 'desktop' && (
         <Suspense fallback={<div className="center-page">Ładowanie…</div>}>
           <DesktopView agent={a} />

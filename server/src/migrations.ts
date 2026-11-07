@@ -298,4 +298,24 @@ export const MIGRATIONS: string[] = [
     completed_at INTEGER
   );
   `,
+
+  // 11 — stan zabezpieczeń (ocena) i historia zmian komputera (v0.19.0)
+  `
+  ALTER TABLE agents ADD COLUMN security_json TEXT;
+
+  CREATE TABLE agent_changes (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    ts       INTEGER NOT NULL,
+    kind     TEXT NOT NULL,           -- software | os | hardware | security | system
+    title    TEXT NOT NULL,
+    detail   TEXT
+  );
+  CREATE INDEX agent_changes_agent ON agent_changes(agent_id, ts DESC);
+  CREATE INDEX agent_changes_ts ON agent_changes(ts DESC);
+
+  -- domyślnie tylko problemy krytyczne (antywirus/zapora/SIP wyłączone); próg 1 = także ostrzeżenia
+  INSERT INTO alert_rules (name, kind, threshold, duration_min, created_at) VALUES
+    ('Krytyczny problem z zabezpieczeniami', 'security', 2, 0, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+  `,
 ];

@@ -35,7 +35,7 @@ export interface MetricSample {
 
 export type MetricRange = '1h' | '6h' | '24h' | '7d';
 
-export type AlertKind = 'offline' | 'cpu' | 'mem' | 'disk' | 'license';
+export type AlertKind = 'offline' | 'cpu' | 'mem' | 'disk' | 'license' | 'security';
 
 export interface AlertItem {
   id: number;
@@ -103,8 +103,56 @@ export interface Agent {
   siteName: string | null;
   tags: TagRef[];
   notes: string;
+  /** ocena zabezpieczeń (null — brak danych / starszy agent) */
+  security: SecuritySummary | null;
   /** tylko po stronie panelu: zmienia się, gdy serwer zgłosi nowe dane inwentarza */
   rev?: number;
+}
+
+export type Severity = 'critical' | 'warning' | 'info';
+export interface SecurityIssue {
+  code: string;
+  severity: Severity;
+  title: string;
+  detail?: string;
+}
+export interface SecuritySummary {
+  level: 'ok' | Severity;
+  issues: SecurityIssue[];
+  checkedAt: number;
+}
+
+/** Surowy stan zabezpieczeń z agenta (inwentarz). */
+export interface SecurityFacts {
+  checkedAt: number;
+  antivirus?: {
+    defender: boolean;
+    enabled: boolean;
+    realTime: boolean;
+    tamperProtected?: boolean;
+    signatureAgeDays: number;
+    signatureUpdated?: number;
+    products?: { name: string; enabled: boolean; upToDate: boolean }[];
+  };
+  firewall?: { enabled: boolean; profiles?: { name: string; enabled: boolean }[] };
+  encryption?: { name: string; enabled: boolean; status?: string };
+  updates?: { checkedAt?: number; pending: number; security: number; titles?: string[]; error?: string; rebootRequired: boolean; lastInstalled?: number };
+  gatekeeper?: boolean;
+  sip?: boolean;
+}
+
+export type ChangeKind = 'software' | 'os' | 'hardware' | 'security' | 'system';
+export interface ChangeItem {
+  id: number;
+  agentId: string;
+  ts: number;
+  kind: ChangeKind;
+  title: string;
+  detail: string | null;
+  /** tylko w liście ze wszystkich komputerów */
+  hostname?: string;
+  label?: string;
+  clientName?: string | null;
 }
 
 export interface Inventory {
@@ -130,6 +178,7 @@ export interface Inventory {
   softwareError?: string;
   /** tylko Windows: licencja, ochrona przed zapisem (UWF), zadania kiosku */
   windows?: WinStatus | null;
+  security?: SecurityFacts | null;
 }
 
 export interface WinStatus {
@@ -369,6 +418,11 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
 
 type Ok = { ok: true };
 
+/** Parametry zapytania bez pustych wartości. */
+function qs(q: Record<string, string | number | undefined>): string {
+  return new URLSearchParams(Object.entries(q).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)])).toString();
+}
+
 export const api = {
   // uwierzytelnianie
   me: () => request<Me>('GET', '/api/auth/me'),
@@ -393,6 +447,9 @@ export const api = {
     request<{ updated: number }>('POST', '/api/agents/bulk', body),
   refreshInventory: (id: string) => request<Ok>('POST', `/api/agents/${id}/refresh`, {}),
   deleteAgent: (id: string) => request<Ok>('DELETE', `/api/agents/${id}`),
+  agentChanges: (id: string, q: { kind?: ChangeKind; before?: number } = {}) =>
+    request<{ items: ChangeItem[] }>('GET', `/api/agents/${id}/changes?${qs(q)}`),
+  changes: (q: { kind?: ChangeKind; before?: number; q?: string } = {}) => request<{ items: ChangeItem[] }>('GET', `/api/changes?${qs(q)}`),
   metricsHistory: (id: string, range: MetricRange) => request<{ range: MetricRange; samples: MetricSample[] }>('GET', `/api/agents/${id}/metrics?range=${range}`),
 
   // praca zdalna

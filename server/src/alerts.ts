@@ -1,8 +1,9 @@
 import type { Db } from './db.ts';
 import type { Hub } from './hub.ts';
 import type { Notifier } from './notify.ts';
+import { SEVERITY_RANK, type SecuritySummary } from './security.ts';
 
-export const ALERT_KINDS = ['offline', 'cpu', 'mem', 'disk', 'license'] as const;
+export const ALERT_KINDS = ['offline', 'cpu', 'mem', 'disk', 'license', 'security'] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 
 export interface AlertRule {
@@ -184,6 +185,26 @@ export class AlertEngine {
     }
   }
 
+  /**
+   * Nowa ocena zabezpieczeń: reguły „security” — próg 2 = tylko problemy krytyczne,
+   * 1 = krytyczne i ostrzeżenia. Wartość alertu = liczba problemów, szczegół = ich lista.
+   */
+  onSecurity(agentId: string, sec: SecuritySummary, now = Date.now()): void {
+    const a = this.agent(agentId);
+    if (!a) return;
+    for (const rule of this.rules) {
+      if (rule.kind !== 'security') continue;
+      const key = `${rule.id}:${agentId}`;
+      const hits = this.applies(rule, a) ? sec.issues.filter((i) => SEVERITY_RANK[i.severity] >= rule.threshold) : [];
+      if (hits.length === 0) {
+        if (this.open.has(key)) this.resolve(key, rule, a, now, this.applies(rule, a));
+        continue;
+      }
+      if (this.open.has(key)) continue;
+      this.openAlert(rule, a, hits.length, hits.map((i) => i.title).join(' · '), now);
+    }
+  }
+
   /** Komputer połączył się — zamknij jego alerty „offline”. */
   onConnected(agentId: string, now = Date.now()): void {
     const a = this.agent(agentId);
@@ -256,7 +277,7 @@ export class AlertEngine {
       this.notifier.enqueue({
         title: `${machineName(a)}: ${rule.name}`,
         message: describe(rule, value, detail, startedAt),
-        priority: rule.kind === 'offline' || rule.kind === 'disk' || rule.kind === 'license' ? 1 : 0,
+        priority: rule.kind === 'offline' || rule.kind === 'disk' || rule.kind === 'license' || rule.kind === 'security' ? 1 : 0,
         url: this.notifier.machineUrl(a.id),
         urlTitle: 'Otwórz w panelu',
       });
@@ -312,6 +333,8 @@ function describe(rule: AlertRule, value: number | null, detail: string, started
       return `Dysk ${detail} zajęty w ${pct(value ?? 0)} (próg ${pct(rule.threshold)}).`;
     case 'license':
       return `Wersja próbna Windows kończy się za ${value ?? '?'} dni (${detail}). Przedłużysz ją w panelu: komputer → Windows → Przedłuż okres próbny.`;
+    case 'security':
+      return `Zabezpieczenia: ${detail}.`;
   }
 }
 

@@ -49,7 +49,8 @@ Kanał otwiera serwer poleceniem (np. `term.open` z polem `channel`). Odbiorcę 
 |---|---|---|
 | `hello` | zaraz po połączeniu | `{ version, protocol, capabilities: string[], inventory }` |
 | `metrics` | co 15 s | `Metrics` (CPU, RAM, dyski, sieć, uptime, zalogowani) |
-| `inventory` | co 6 h | `Inventory` (system, sprzęt, dyski, sieć, oprogramowanie) |
+| `inventory` | co 6 h | `Inventory` (system, sprzęt, dyski, sieć, oprogramowanie; od 0.19.0 także `security`) |
+| `security` | co 1 h i po wyszukaniu aktualizacji (od 0.19.0) | `Security`: antywirus (Defender + produkty z Centrum zabezpieczeń), zapora, szyfrowanie (BitLocker/FileVault), aktualizacje (Windows Update / `softwareupdate`, wyszukiwane w tle co 12 h), macOS: Gatekeeper, SIP. Ocena (krytyczne / ostrzeżenia / informacje) jest na serwerze (`security.ts`); serwer porównuje też kolejne inwentarze i zapisuje historię zmian (`agent_changes`: programy, system, sprzęt, zabezpieczenia) |
 
 ### Żądania serwer → agent (z `id`)
 

@@ -29,6 +29,7 @@ func runAgent(ctx context.Context, cfgPath string, cfg *Config) {
 	setKioskContext(cfgPath)
 	go updateLoop(ctx, cfg, cfgPath)
 	go resumeKioskTask(ctx) // np. przedłużanie okresu próbnego przerwane restartem
+	go runUpdatesChecker(ctx)
 	backoff := time.Second
 	for {
 		started := time.Now()
@@ -188,8 +189,10 @@ func session(parent context.Context, cfg *Config, cfgPath string) error {
 		mc := newMetricsCollector()
 		metricsT := time.NewTicker(metricsInterval)
 		invT := time.NewTicker(inventoryInterval)
+		secT := time.NewTicker(securityInterval)
 		defer metricsT.Stop()
 		defer invT.Stop()
+		defer secT.Stop()
 		if err := send("metrics", mc.collect(ctx)); err != nil {
 			fail(err)
 			return
@@ -205,6 +208,10 @@ func session(parent context.Context, cfg *Config, cfgPath string) error {
 				err = send("inventory", collectInventory(ctx))
 			case <-inventoryNow:
 				err = send("inventory", collectInventory(ctx))
+			case <-secT.C:
+				err = sendSecurity(ctx, send)
+			case <-securityNow:
+				err = sendSecurity(ctx, send)
 			}
 			if err != nil {
 				fail(err)

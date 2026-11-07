@@ -5,6 +5,10 @@ import { HttpError } from './errors.ts';
 import type { Scope } from './context.ts';
 import type { MetricsStore } from './metrics.ts';
 import { canSeeClient, scopeSql } from './scope.ts';
+import { assessSecurity, diffInventory, diffSecurity, type Change, type SecuritySummary } from './security.ts';
+
+/** Najwięcej wpisów historii zmian na komputer (najstarsze usuwamy). */
+const MAX_CHANGES = 2000;
 
 /**
  * Protokół agent <-> serwer (JSON w ramkach tekstowych WebSocket), opis: docs/protocol.md
@@ -90,6 +94,8 @@ export interface AgentSummary {
   siteName: string | null;
   tags: TagRef[];
   notes: string;
+  /** ocena zabezpieczeń (null — agent jeszcze nie zgłosił / starsza wersja) */
+  security: SecuritySummary | null;
 }
 
 export interface TagRef {
@@ -105,6 +111,8 @@ export interface HubEvents {
   ready: (agentId: string) => void;
   /** nowy inwentarz (m.in. licencja Windows) */
   inventory: (agentId: string, inv: Record<string, any>) => void;
+  /** nowa ocena zabezpieczeń (z inwentarzem albo osobno, co godzinę) */
+  security: (agentId: string, sec: SecuritySummary) => void;
 }
 
 interface PanelState {
@@ -130,6 +138,7 @@ export interface AgentRow {
   client_id: number | null;
   site_id: number | null;
   notes: string;
+  security_json: string | null;
 }
 
 type SummaryRow = AgentRow & { client_name: string | null; client_color: string | null; site_name: string | null };
@@ -152,7 +161,7 @@ export class Hub {
   private pingTimer: NodeJS.Timeout;
   private closed = false;
   /** Słuchacze zdarzeń agentów (silnik alertów, aktualizacje, zadania); błąd słuchacza nie przerywa obsługi agenta. */
-  private listeners: { [K in keyof HubEvents]: HubEvents[K][] } = { metrics: [], connected: [], ready: [], inventory: [] };
+  private listeners: { [K in keyof HubEvents]: HubEvents[K][] } = { metrics: [], connected: [], ready: [], inventory: [], security: [] };
 
   on<K extends keyof HubEvents>(name: K, fn: HubEvents[K]): void {
     this.listeners[name].push(fn);
@@ -252,6 +261,11 @@ export class Hub {
         this.broadcastAgent(agentId, { type: 'agent_updated', id: agentId, data: this.summary(agentId) });
         break;
       }
+      case 'security': {
+        if (msg.data && typeof msg.data === 'object') this.storeSecurity(agentId, msg.data as Record<string, any>);
+        this.broadcastAgent(agentId, { type: 'agent_updated', id: agentId, data: this.summary(agentId) });
+        break;
+      }
       case 'metrics': {
         this.db.prepare('UPDATE agents SET metrics_json = ?, last_seen = ? WHERE id = ?').run(JSON.stringify(msg.data ?? {}), now, agentId);
         this.metrics?.record(agentId, (msg.data ?? null) as Record<string, unknown> | null);
@@ -292,18 +306,60 @@ export class Hub {
 
   storeInventory(agentId: string, inv: Record<string, any>): void {
     const host = inv.host ?? {};
+    const prev = this.previous(agentId);
+    const os = str(host.os) || prev.os;
+    // starszy agent nie zbiera zabezpieczeń — zostaje poprzednia ocena
+    const sec = inv.security ? assessSecurity(inv.security, os) : prev.security;
     this.db
-      .prepare('UPDATE agents SET hostname = ?, os = ?, platform = ?, arch = ?, inventory_json = ?, last_seen = ? WHERE id = ?')
+      .prepare('UPDATE agents SET hostname = ?, os = ?, platform = ?, arch = ?, inventory_json = ?, security_json = ?, last_seen = ? WHERE id = ?')
       .run(
         str(host.hostname, 'unknown'),
         str(host.os),
         [host.platform, host.platformVersion].filter(Boolean).join(' '),
         str(host.arch),
         JSON.stringify(inv),
+        sec ? JSON.stringify(sec) : null,
         Date.now(),
         agentId,
       );
+    this.recordChanges(agentId, [...diffInventory(prev.inventory, inv), ...diffSecurity(prev.security, sec)]);
     this.notify('inventory', agentId, inv);
+    if (sec && inv.security) this.notify('security', agentId, sec);
+  }
+
+  /** Stan zabezpieczeń między inwentarzami (agent wysyła co godzinę). */
+  storeSecurity(agentId: string, raw: Record<string, any>): void {
+    const prev = this.previous(agentId);
+    const sec = assessSecurity(raw, prev.os);
+    if (!sec) return;
+    const inv = prev.inventory ?? {};
+    inv.security = raw;
+    this.db.prepare('UPDATE agents SET inventory_json = ?, security_json = ? WHERE id = ?').run(JSON.stringify(inv), JSON.stringify(sec), agentId);
+    this.recordChanges(agentId, diffSecurity(prev.security, sec));
+    this.notify('security', agentId, sec);
+  }
+
+  private previous(agentId: string): { inventory: Record<string, any> | null; security: SecuritySummary | null; os: string } {
+    const row = this.db.prepare('SELECT inventory_json, security_json, os FROM agents WHERE id = ?').get(agentId) as
+      | { inventory_json: string | null; security_json: string | null; os: string }
+      | undefined;
+    const parse = (s: string | null | undefined) => {
+      try {
+        return s ? JSON.parse(s) : null;
+      } catch {
+        return null;
+      }
+    };
+    return { inventory: parse(row?.inventory_json), security: parse(row?.security_json), os: row?.os ?? '' };
+  }
+
+  private recordChanges(agentId: string, changes: Change[], now = Date.now()): void {
+    if (changes.length === 0) return;
+    const ins = this.db.prepare('INSERT INTO agent_changes (agent_id, ts, kind, title, detail) VALUES (?, ?, ?, ?, ?)');
+    for (const c of changes) ins.run(agentId, now, c.kind, c.title.slice(0, 300), c.detail?.slice(0, 1000) ?? null);
+    this.db
+      .prepare('DELETE FROM agent_changes WHERE agent_id = ? AND id NOT IN (SELECT id FROM agent_changes WHERE agent_id = ? ORDER BY ts DESC, id DESC LIMIT ?)')
+      .run(agentId, agentId, MAX_CHANGES);
   }
 
   /**
@@ -501,6 +557,7 @@ export class Hub {
       siteName: r.site_name,
       tags,
       notes: r.notes,
+      security: r.security_json ? JSON.parse(r.security_json) : null,
     };
   }
 

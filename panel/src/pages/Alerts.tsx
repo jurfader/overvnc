@@ -9,6 +9,7 @@ import {
   History,
   KeyRound,
   MemoryStick,
+  ShieldAlert,
   Pencil,
   Plus,
   Send,
@@ -31,6 +32,7 @@ export const KIND_ICON: Record<AlertKind, LucideIcon> = {
   mem: MemoryStick,
   disk: HardDrive,
   license: KeyRound,
+  security: ShieldAlert,
 };
 const KIND_LABEL: Record<AlertKind, string> = {
   offline: 'Komputer offline',
@@ -38,12 +40,14 @@ const KIND_LABEL: Record<AlertKind, string> = {
   mem: 'Pamięć',
   disk: 'Dysk',
   license: 'Licencja Windows',
+  security: 'Zabezpieczenia',
 };
 
 /** Krótki opis wartości alertu, np. „96% · D:\”. */
 export function alertValue(a: Pick<AlertItem, 'kind' | 'value' | 'detail'>): string {
   if (a.kind === 'offline') return 'brak połączenia';
   if (a.kind === 'license') return [a.value === null ? '' : `zostało ${Math.round(a.value)} dni`, a.detail].filter(Boolean).join(' · ');
+  if (a.kind === 'security') return a.detail;
   const v = a.value === null ? '' : `${Math.round(a.value)}%`;
   return [v, a.detail].filter(Boolean).join(' · ');
 }
@@ -198,6 +202,7 @@ function describeRule(r: AlertRule): string {
   const dur = r.durationMin ? ` przez ${r.durationMin} min` : ' (od razu)';
   if (r.kind === 'offline') return `Brak połączenia przez ${r.durationMin} min`;
   if (r.kind === 'license') return `Wersja próbna Windows: ≤ ${r.threshold} dni do końca`;
+  if (r.kind === 'security') return r.threshold >= 2 ? 'Krytyczne problemy (antywirus, zapora, SIP)' : 'Krytyczne problemy i ostrzeżenia (też poprawki, restart)';
   return `${KIND_LABEL[r.kind]} ≥ ${r.threshold}%${dur}`;
 }
 
@@ -313,6 +318,11 @@ function RulesView() {
 
 const KIND_OPTIONS: { value: AlertKind; label: string; hint: string }[] = [
   {
+    value: 'security',
+    label: 'Problemy z zabezpieczeniami',
+    hint: 'Antywirus lub zapora wyłączone, nieaktualne definicje, brakujące poprawki bezpieczeństwa, wymagany restart.',
+  },
+  {
     value: 'license',
     label: 'Kończy się wersja próbna Windows',
     hint: 'Ewaluacyjny Windows (90 dni) kończy się za podaną liczbę dni lub mniej.',
@@ -407,8 +417,17 @@ function RuleModal({ rule, onClose, onSaved }: { rule: AlertRule | null | undefi
                   onChange={() =>
                     set({
                       kind: o.value,
-                      durationMin: o.value === 'offline' ? Math.max(1, f.durationMin || 10) : o.value === 'license' ? 0 : f.durationMin,
-                      threshold: o.value === 'license' ? (f.kind === 'license' ? f.threshold : 14) : f.kind === 'license' ? 90 : f.threshold,
+                      durationMin: o.value === 'offline' ? Math.max(1, f.durationMin || 10) : o.value === 'license' || o.value === 'security' ? 0 : f.durationMin,
+                      threshold:
+                        o.value === f.kind
+                          ? f.threshold
+                          : o.value === 'license'
+                            ? 14
+                            : o.value === 'security'
+                              ? 2
+                              : f.kind === 'license' || f.kind === 'security'
+                                ? 90
+                                : f.threshold,
                     })
                   }
                 />
@@ -424,12 +443,20 @@ function RuleModal({ rule, onClose, onSaved }: { rule: AlertRule | null | undefi
           <input className="pole" value={f.name} onChange={(e) => set({ name: e.target.value })} placeholder={KIND_OPTIONS.find((k) => k.value === f.kind)!.label} maxLength={100} />
         </Field>
         <div className="form-2">
-          {f.kind !== 'offline' && (
+          {f.kind === 'security' && (
+            <Field label="Które problemy">
+              <select className="pole" value={f.threshold >= 2 ? 2 : 1} onChange={(e) => set({ threshold: Number(e.target.value) })}>
+                <option value={2}>tylko krytyczne — antywirus, zapora, SIP wyłączone</option>
+                <option value={1}>krytyczne i ostrzeżenia — także poprawki, restart, definicje</option>
+              </select>
+            </Field>
+          )}
+          {f.kind !== 'offline' && f.kind !== 'security' && (
             <Field label={f.kind === 'license' ? 'Alert, gdy do końca zostało dni (≤)' : 'Próg (%)'}>
               <input className="pole" type="number" min={1} max={f.kind === 'license' ? 90 : 100} value={f.threshold} onChange={(e) => set({ threshold: Number(e.target.value) })} required />
             </Field>
           )}
-          {f.kind !== 'license' && (
+          {f.kind !== 'license' && f.kind !== 'security' && (
             <Field
               label={f.kind === 'offline' ? 'Offline dłużej niż (min)' : 'Musi trwać (min, 0 = od razu)'}
               hint={f.kind === 'offline' ? 'Kioski wyłączane na noc? Ustaw dłuższy czas albo wyłącz push.' : undefined}

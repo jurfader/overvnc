@@ -6,6 +6,7 @@ import { ago, bytes, platformLabel, plural } from '../format.ts';
 import { useAlerts, useMe, useOrg } from '../state.tsx';
 import { BulkModal, type BulkMode } from './organize.tsx';
 import { NewJobModal } from './Jobs.tsx';
+import { SecurityShield } from './protection.tsx';
 import type { JobKind } from '../api.ts';
 
 type StatusFilter = 'all' | 'online' | 'offline' | 'alert';
@@ -259,6 +260,7 @@ export function Machines({ agents, initialClient }: { agents: Agent[]; initialCl
                     <td className="s-end">
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'inherit' }}>
                         <Status online={a.online} />
+                        <SecurityShield security={a.security} />
                         {warn.length > 0 && (
                           <span className="only-desktop">
                             <Badge variant="danger">

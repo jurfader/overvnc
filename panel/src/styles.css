@@ -963,3 +963,66 @@ textarea.pole.editor-area { font: 12.5px/1.55 var(--font-mono); height: 58vh; mi
 .desktop-notice .small { color: rgb(var(--ink-2)); margin-top: 2px; }
 .notice-retry { display: inline !important; color: rgb(var(--primary)) !important; font-weight: 600; }
 .desktop-notice code { overflow-wrap: anywhere; }
+
+/* ---------- zabezpieczenia ---------- */
+.sec-shield { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 7px; flex-shrink: 0; }
+.sec-shield svg { width: 15px; height: 15px; }
+.sec-shield.sev-critical { color: rgb(var(--danger)); background: rgb(var(--danger) / 0.12); }
+.sec-shield.sev-warning { color: rgb(var(--warning)); background: rgb(var(--warning) / 0.12); }
+.sec-link { display: inline-flex; vertical-align: middle; }
+
+.sec-head-main { display: flex; align-items: center; gap: 14px; }
+.sec-head-main > div { flex: 1; min-width: 0; }
+.sec-head-main h3 { margin: 0 0 2px; font-size: 17px; }
+.sec-head-icon { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 12px; flex-shrink: 0; color: rgb(var(--success)); background: rgb(var(--success) / 0.12); }
+.sec-head-icon svg { width: 24px; height: 24px; }
+.sec-head.sev-critical .sec-head-icon { color: rgb(var(--danger)); background: rgb(var(--danger) / 0.12); }
+.sec-head.sev-warning .sec-head-icon { color: rgb(var(--warning)); background: rgb(var(--warning) / 0.12); }
+.sec-head.sev-info .sec-head-icon { color: rgb(var(--info)); background: rgb(var(--info) / 0.12); }
+.sec-head.sev-critical { border-color: rgb(var(--danger) / 0.35); }
+
+.sec-issues { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 8px; }
+.sec-issues li { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; background: rgb(var(--fill) / 0.04); border: 1px solid rgb(var(--fill) / 0.08); }
+.sec-issues li > svg { width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; }
+.sec-issues li.sev-critical { border-color: rgb(var(--danger) / 0.3); background: rgb(var(--danger) / 0.06); }
+.sec-issues li.sev-critical > svg { color: rgb(var(--danger)); }
+.sec-issues li.sev-warning > svg { color: rgb(var(--warning)); }
+.sec-issues li.sev-info > svg { color: rgb(var(--info)); }
+
+.sec-state { font-weight: 500; }
+.sec-state.ok { color: rgb(var(--success)); }
+.sec-state.bad { color: rgb(var(--danger)); }
+.sec-updates { margin: 6px 0 0; padding-left: 18px; color: rgb(var(--ink-2)); }
+.sec-updates li { margin: 2px 0; overflow-wrap: anywhere; }
+
+/* ---------- historia zmian ---------- */
+.changes { display: grid; gap: 14px; margin-bottom: 12px; }
+.changes-day h4 { margin: 0 0 6px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: rgb(var(--faint)); }
+.changes-day h4::first-letter { text-transform: uppercase; }
+.changes-day ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.change { display: flex; align-items: flex-start; gap: 10px; padding: 7px 8px; border-radius: 8px; }
+.change:hover { background: rgb(var(--fill) / 0.04); }
+.change-icon { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 8px; flex-shrink: 0; color: rgb(var(--ink-2)); background: rgb(var(--fill) / 0.06); }
+.change-icon svg { width: 14px; height: 14px; }
+.change.kind-software .change-icon { color: rgb(var(--primary)); background: rgb(var(--primary) / 0.1); }
+.change.kind-security .change-icon { color: rgb(var(--success)); background: rgb(var(--success) / 0.1); }
+.change.kind-security.bad .change-icon { color: rgb(var(--danger)); background: rgb(var(--danger) / 0.1); }
+.change-body { flex: 1; min-width: 0; }
+.change-title { overflow-wrap: anywhere; }
+.change-machine { font-weight: 600; margin-right: 6px; }
+.change-machine::after { content: ' ·'; color: rgb(var(--faint)); font-weight: 400; }
+.change-detail { overflow-wrap: anywhere; }
+.change time { flex-shrink: 0; padding-top: 3px; }
+.changes-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+.changes-search { flex: 1; min-width: 200px; }
+.audit-toolbar { justify-content: flex-end; }
+.card-head:has(.seg) { flex-wrap: wrap; }
+.changes-kinds { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.changes-kinds::-webkit-scrollbar { display: none; }
+.changes-kinds .seg-btn { white-space: nowrap; }
+@media (max-width: 720px) {
+  .sec-head-main { flex-wrap: wrap; }
+  .sec-head-main h3 { font-size: 16px; }
+  .sec-head-main .btn { width: 100%; justify-content: center; }
+  .sec-head-main .btn .btn-label { display: inline; }
+}

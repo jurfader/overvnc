@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react';
 import { api, type AuditEntry } from '../api.ts';
 import { Badge, Button } from '../components.tsx';
 import { dateTime } from '../format.ts';
+import { AllChanges } from './protection.tsx';
 
 type Tone = 'success' | 'warning' | 'danger' | 'info' | 'neutral' | 'brand';
 
@@ -73,6 +74,33 @@ const ACTIONS: Record<string, [string, Tone]> = {
 };
 
 export function Audit() {
+  const [view, setView] = useState<'panel' | 'changes'>(() => (location.hash.includes('changes') ? 'changes' : 'panel'));
+  return (
+    <>
+      <header className="page-head anim-rise">
+        <div>
+          <h1>Dziennik zdarzeń</h1>
+          <div className="sub">{view === 'panel' ? 'Kto, co i kiedy zrobił w systemie' : 'Programy, system, sprzęt i zabezpieczenia na komputerach'}</div>
+        </div>
+      </header>
+      <div className="seg anim-rise" role="tablist" aria-label="Rodzaj dziennika" style={{ alignSelf: 'flex-start', maxWidth: '100%', overflowX: 'auto' }}>
+        {(
+          [
+            ['panel', 'Działania w panelu'],
+            ['changes', 'Zmiany na komputerach'],
+          ] as const
+        ).map(([k, label]) => (
+          <button key={k} type="button" role="tab" aria-selected={view === k} className={`seg-btn ${view === k ? 'on' : ''}`} onClick={() => setView(k)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {view === 'panel' ? <PanelLog /> : <AllChanges />}
+    </>
+  );
+}
+
+function PanelLog() {
   const [rows, setRows] = useState<AuditEntry[]>([]);
   const [hideConn, setHideConn] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -87,20 +115,14 @@ export function Audit() {
 
   return (
     <>
-      <header className="page-head anim-rise">
-        <div>
-          <h1>Dziennik zdarzeń</h1>
-          <div className="sub">Kto, co i kiedy zrobił w systemie</div>
-        </div>
-        <div className="toolbar">
-          <label className="check">
-            <input type="checkbox" checked={hideConn} onChange={(e) => setHideConn(e.target.checked)} /> Ukryj połączenia i rozłączenia
-          </label>
-          <Button icon={RefreshCw} loading={loading} onClick={load}>
-            Odśwież
-          </Button>
-        </div>
-      </header>
+      <div className="toolbar audit-toolbar anim-rise">
+        <label className="check">
+          <input type="checkbox" checked={hideConn} onChange={(e) => setHideConn(e.target.checked)} /> Ukryj połączenia i rozłączenia
+        </label>
+        <Button icon={RefreshCw} loading={loading} onClick={load}>
+          Odśwież
+        </Button>
+      </div>
       <div className="glass-card table-card anim-rise" style={{ animationDelay: '40ms' }}>
         <div className="table-scroll">
           <table className="table hover stack">
