@@ -96,6 +96,10 @@ export interface AgentSummary {
   notes: string;
   /** ocena zabezpieczeń (null — agent jeszcze nie zgłosił / starsza wersja) */
   security: SecuritySummary | null;
+  /** profil: zwykły komputer albo kiosk */
+  kind: 'computer' | 'kiosk';
+  /** kiosk: aplikacja „Zdjęcia z telefonu” */
+  phoneApp: boolean;
 }
 
 export interface TagRef {
@@ -139,6 +143,8 @@ export interface AgentRow {
   site_id: number | null;
   notes: string;
   security_json: string | null;
+  kind: string;
+  phone_app: number;
 }
 
 type SummaryRow = AgentRow & { client_name: string | null; client_color: string | null; site_name: string | null };
@@ -558,6 +564,8 @@ export class Hub {
       tags,
       notes: r.notes,
       security: r.security_json ? JSON.parse(r.security_json) : null,
+      kind: r.kind === 'kiosk' ? 'kiosk' : 'computer',
+      phoneApp: !!r.phone_app,
     };
   }
 

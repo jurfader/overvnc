@@ -108,6 +108,10 @@ func main() {
 	case "version":
 		fmt.Println(version)
 
+	case "phone":
+		// „Zdjęcia z telefonu” — aplikacja klienta kiosku (uruchamia ją klient z menu Start albo agent po podłączeniu telefonu)
+		os.Exit(runPhoneApp(fs.Args()))
+
 	case "desktop-overlay":
 		// ramka „Aktywne Wsparcie Techniczne” — proces użytkownika uruchamiany przez agenta na czas sesji pulpitu
 		os.Exit(runOverlayProcess(fs.Arg(0)))

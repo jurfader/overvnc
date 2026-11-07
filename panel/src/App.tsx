@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { BellRing, Building2, ChevronRight, LayoutGrid, ListChecks, CloudDownload, LogOut, Menu, Monitor, Moon, PlusCircle, ScrollText, Sun, UserCog, Users, X, type LucideIcon } from 'lucide-react';
+import { BellRing, Building2, ChevronRight, LayoutGrid, ListChecks, CloudDownload, LogOut, Menu, Monitor, Moon, PlusCircle, ScrollText, Store, Sun, UserCog, Users, X, type LucideIcon } from 'lucide-react';
 import { api, type Agent, type Me, type Permission } from './api.ts';
 import { useLiveEvents, type LiveEvent } from './live.ts';
 import { applyTheme, readTheme, Toasts, type Theme } from './components.tsx';
@@ -160,12 +160,20 @@ function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme
 
   const list = [...agents.values()];
   const online = list.filter((a) => a.online).length;
+  // kioski osobno: własna lista, własne dodawanie, funkcje kiosku tylko tam
+  const kiosks = list.filter((a) => a.kind === 'kiosk');
+  const pcs = list.filter((a) => a.kind !== 'kiosk');
+  const onlineKiosks = kiosks.filter((a) => a.online).length;
+  const onlinePcs = online - onlineKiosks;
+  const detailId = /^\/m\/([0-9a-f-]{36})/.exec(path)?.[1];
+  const kioskDetail = !!detailId && agents.get(detailId)?.kind === 'kiosk';
 
   const allGroups: { title: string; items: NavItem[] }[] = [
     {
       title: 'Zarządzanie',
       items: [
-        { href: '/', label: 'Komputery', icon: Monitor, perm: 'agents.view', match: (p) => p === '/' || p.startsWith('/m/'), count: online || undefined },
+        { href: '/', label: 'Komputery', icon: Monitor, perm: 'agents.view', match: (p) => p === '/' || (p.startsWith('/m/') && !kioskDetail), count: onlinePcs || undefined },
+        { href: '/kiosks', label: 'Kioski', icon: Store, perm: 'agents.view', match: (p) => p === '/kiosks' || (p.startsWith('/m/') && kioskDetail), count: onlineKiosks || undefined },
         {
           href: '/alerts',
           label: 'Alerty',
@@ -204,12 +212,13 @@ function Shell({ me, theme, onToggleTheme, onLogout, reloadMe }: { me: Me; theme
   else if (['/jobs', '/jobs/schedules', '/jobs/scripts', '/jobs/files'].includes(path) && can('agents.remote'))
     page = <Jobs agents={list} tab={path === '/jobs/schedules' ? 'schedules' : path === '/jobs/scripts' ? 'scripts' : path === '/jobs/files' ? 'files' : 'history'} />;
   else if (/^\/jobs\/\d+$/.test(path) && can('agents.remote')) page = <JobPage key={path} id={Number(path.slice(6))} agents={agents} />;
-  else if (path === '/tokens' && can('tokens.manage')) page = <Tokens />;
+  else if (path === '/tokens' && can('tokens.manage')) page = <Tokens key={query.get('kind') ?? ''} kind={query.get('kind') === 'kiosk' ? 'kiosk' : 'computer'} />;
+  else if (path === '/kiosks') page = <Machines key="kiosks" kind="kiosk" agents={kiosks} initialClient={query.get('client') ? Number(query.get('client')) : null} />;
   else if (path === '/team' && can('team.manage')) page = <Team />;
   else if (path === '/audit' && can('audit.view') && me.allClients) page = <Audit />;
   else if (path === '/account') page = <Account />;
   else if (path === '/updates' && can('agents.manage') && me.allClients) page = <Updates />;
-  else page = <Machines agents={list} initialClient={query.get('client') ? Number(query.get('client')) : null} />;
+  else page = <Machines key="pcs" kind="computer" agents={pcs} initialClient={query.get('client') ? Number(query.get('client')) : null} />;
 
   return (
     <div className="layout">

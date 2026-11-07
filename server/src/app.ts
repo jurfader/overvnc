@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import { installProfilePush } from './profile.ts';
 import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
@@ -61,6 +62,7 @@ export async function buildApp(config: Config, db: Db): Promise<{ app: FastifyIn
   hub.on('metrics', (id, m) => alerts.onMetrics(id, m));
   hub.on('inventory', (id, inv) => alerts.onInventory(id, inv));
   hub.on('security', (id, sec) => alerts.onSecurity(id, sec));
+  installProfilePush(db, hub, (msg) => app.log.warn(msg));
   hub.on('connected', (id) => alerts.onConnected(id));
   const jobs = new JobRunner(db, hub, (msg) => app.log.warn(msg));
   const ctx: Ctx = {

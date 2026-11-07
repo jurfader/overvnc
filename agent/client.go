@@ -30,6 +30,7 @@ func runAgent(ctx context.Context, cfgPath string, cfg *Config) {
 	go updateLoop(ctx, cfg, cfgPath)
 	go resumeKioskTask(ctx) // np. przedłużanie okresu próbnego przerwane restartem
 	go runUpdatesChecker(ctx)
+	go runPhoneWatcher(ctx) // kiosk: „Zdjęcia z telefonu” po podłączeniu telefonu
 	backoff := time.Second
 	for {
 		started := time.Now()

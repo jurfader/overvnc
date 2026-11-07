@@ -49,7 +49,11 @@ func powershellExe() string {
 }
 
 func runPowerShell(ctx context.Context, script string) ([]byte, error) {
-	return exec.CommandContext(ctx, powershellExe(), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script).CombinedOutput()
+	return runPowerShellCmd(ctx, script).CombinedOutput()
+}
+
+func runPowerShellCmd(ctx context.Context, script string) *exec.Cmd {
+	return exec.CommandContext(ctx, powershellExe(), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script)
 }
 
 func editionIsEval() bool {

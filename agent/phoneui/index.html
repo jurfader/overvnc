@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Zdjęcia z telefonu</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="3" /><path d="M11 18h2" /></svg>
+        <div>
+          <h1>Zdjęcia z telefonu</h1>
+          <div id="device-name" class="sub">Podłącz telefon kablem USB</div>
+        </div>
+      </div>
+      <div id="devices" class="chips" hidden></div>
+      <button id="select-all" class="btn ghost" hidden>Zaznacz wszystkie</button>
+    </header>
+
+    <nav id="albums" class="chips albums" hidden></nav>
+
+    <main id="main">
+      <section id="empty" class="empty">
+        <svg class="phone-art" viewBox="0 0 120 120" aria-hidden="true">
+          <rect x="38" y="10" width="44" height="80" rx="8" />
+          <path d="M55 80h10" />
+          <path d="M60 90v14q0 8 8 8h20" class="cable" />
+        </svg>
+        <h2>Podłącz telefon kablem USB</h2>
+        <div class="tips">
+          <div class="tip">
+            <strong>Android</strong>
+            <p>Odblokuj telefon. W powiadomieniu „USB” wybierz <b>Przesyłanie plików</b> (albo „Transfer plików”).</p>
+          </div>
+          <div class="tip">
+            <strong>iPhone</strong>
+            <p>Odblokuj telefon i stuknij <b>Zaufaj</b>, gdy zapyta o ten komputer. Wpisz kod, jeśli poprosi.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="loading" class="empty" hidden>
+        <div class="spinner"></div>
+        <h2>Wczytuję zdjęcia z telefonu…</h2>
+        <p class="muted">Przy wielu zdjęciach może to potrwać kilkanaście sekund.</p>
+      </section>
+
+      <section id="noitems" class="empty" hidden>
+        <h2>Nie widzę zdjęć na telefonie</h2>
+        <p class="muted">Odblokuj telefon — Android i iPhone nie pokazują plików, gdy ekran jest zablokowany. Na Androidzie sprawdź, czy wybrane jest „Przesyłanie plików”.</p>
+        <button id="retry" class="btn">Spróbuj ponownie</button>
+      </section>
+
+      <section id="grid" hidden></section>
+    </main>
+
+    <footer id="bar" class="bar" hidden>
+      <div class="bar-info"><b id="sel-count">0</b> <span id="sel-label">zaznaczonych</span></div>
+      <button id="clear" class="btn ghost">Odznacz</button>
+      <button id="delete" class="btn danger">Usuń z telefonu</button>
+      <button id="copy" class="btn primary">Kopiuj do Pobranych</button>
+    </footer>
+
+    <div id="preview" class="overlay" hidden>
+      <button class="close" data-close aria-label="Zamknij">×</button>
+      <button class="nav prev" id="prev" aria-label="Poprzednie">‹</button>
+      <img id="preview-img" alt="" />
+      <button class="nav next" id="next" aria-label="Następne">›</button>
+      <div class="preview-bar">
+        <span id="preview-name"></span>
+        <button id="preview-toggle" class="btn"></button>
+      </div>
+    </div>
+
+    <div id="dialog" class="overlay" hidden>
+      <div class="card">
+        <h2 id="dialog-title"></h2>
+        <p id="dialog-text" class="muted"></p>
+        <div class="progress" id="dialog-progress" hidden><div></div></div>
+        <div class="actions" id="dialog-actions"></div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" hidden></div>
+    <script src="app.js"></script>
+  </body>
+</html>

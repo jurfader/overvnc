@@ -105,10 +105,15 @@ export interface Agent {
   notes: string;
   /** ocena zabezpieczeń (null — brak danych / starszy agent) */
   security: SecuritySummary | null;
+  /** profil: zwykły komputer albo kiosk (funkcje kiosku tylko na kioskach) */
+  kind: AgentKind;
+  /** kiosk: aplikacja „Zdjęcia z telefonu” */
+  phoneApp: boolean;
   /** tylko po stronie panelu: zmienia się, gdy serwer zgłosi nowe dane inwentarza */
   rev?: number;
 }
 
+export type AgentKind = 'computer' | 'kiosk';
 export type Severity = 'critical' | 'warning' | 'info';
 export interface SecurityIssue {
   code: string;
@@ -298,6 +303,7 @@ export interface Tag extends TagRef {
 export interface EnrollToken {
   id: number;
   label: string;
+  kind: AgentKind;
   usesLeft: number | null;
   expiresAt: number;
   createdAt: number;
@@ -441,8 +447,10 @@ export const api = {
   // komputery
   agents: () => request<Agent[]>('GET', '/api/agents'),
   agent: (id: string) => request<AgentDetail>('GET', `/api/agents/${id}`),
-  updateAgent: (id: string, patch: { label?: string; notes?: string; clientId?: number | null; siteId?: number | null; tagIds?: number[] }) =>
-    request<Agent>('PATCH', `/api/agents/${id}`, patch),
+  updateAgent: (
+    id: string,
+    patch: { label?: string; notes?: string; clientId?: number | null; siteId?: number | null; tagIds?: number[]; kind?: AgentKind; phoneApp?: boolean },
+  ) => request<Agent & { profileNote?: string | null }>('PATCH', `/api/agents/${id}`, patch),
   bulkUpdate: (body: { ids: string[]; clientId?: number | null; siteId?: number | null; addTagIds?: number[]; removeTagIds?: number[] }) =>
     request<{ updated: number }>('POST', '/api/agents/bulk', body),
   refreshInventory: (id: string) => request<Ok>('POST', `/api/agents/${id}/refresh`, {}),
@@ -499,7 +507,7 @@ export const api = {
 
   // tokeny rejestracji
   tokens: () => request<EnrollToken[]>('GET', '/api/enroll-tokens'),
-  createToken: (body: { label: string; ttlHours: number; maxUses: number | null; clientId: number | null; siteId: number | null }) =>
+  createToken: (body: { label: string; ttlHours: number; maxUses: number | null; clientId: number | null; siteId: number | null; kind?: AgentKind }) =>
     request<{ id: number; token: string }>('POST', '/api/enroll-tokens', body),
   deleteToken: (id: number) => request<Ok>('DELETE', `/api/enroll-tokens/${id}`),
 

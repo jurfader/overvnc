@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { AlertTriangle, Check, Copy, KeyRound, Laptop, Monitor, PlusCircle, ShieldCheck, Terminal, Trash2 } from 'lucide-react';
-import { api, errorMessage, type EnrollToken } from '../api.ts';
+import { api, errorMessage, type AgentKind, type EnrollToken } from '../api.ts';
 import { Badge, Button, CardHead, ClientLabel, toast } from '../components.tsx';
 import { useMe } from '../state.tsx';
 import { PlacementFields } from './organize.tsx';
@@ -17,7 +17,8 @@ const TTL_OPTIONS = [
   { hours: 24 * 365, label: '1 rok' },
 ];
 
-export function Tokens() {
+export function Tokens({ kind = 'computer' }: { kind?: AgentKind }) {
+  const kiosk = kind === 'kiosk';
   const [tokens, setTokens] = useState<EnrollToken[]>([]);
   const [label, setLabel] = useState('');
   const [ttl, setTtl] = useState(24);
@@ -37,7 +38,7 @@ export function Tokens() {
     e.preventDefault();
     setBusy(true);
     try {
-      const r = await api.createToken({ label, ttlHours: ttl, maxUses: maxUses.trim() === '' ? null : Number(maxUses), clientId, siteId });
+      const r = await api.createToken({ label, ttlHours: ttl, maxUses: maxUses.trim() === '' ? null : Number(maxUses), clientId, siteId, kind });
       setCreated(r.token);
       setLabel('');
       load();
@@ -64,8 +65,12 @@ export function Tokens() {
     <>
       <header className="page-head anim-rise">
         <div>
-          <h1>Dodaj komputer</h1>
-          <div className="sub">Utwórz token rejestracji i zainstaluj agenta OVERVNC na komputerze</div>
+          <h1>{kiosk ? 'Dodaj kiosk' : 'Dodaj komputer'}</h1>
+          <div className="sub">
+            {kiosk
+              ? 'Token dla kiosku — komputer zarejestruje się w sekcji Kioski, z funkcjami kiosku (zdjęcia z telefonu, tryb kiosku, UWF)'
+              : 'Utwórz token rejestracji i zainstaluj agenta OVERVNC na komputerze'}
+          </div>
         </div>
       </header>
 
@@ -74,7 +79,7 @@ export function Tokens() {
         <form className="form-row" onSubmit={create}>
           <label className="field">
             Nazwa komputera
-            <input className="pole" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="np. Kiosk Galeria Bałtycka" />
+            <input className="pole" value={label} onChange={(e) => setLabel(e.target.value)} placeholder={kiosk ? 'np. Kiosk Galeria Bałtycka' : 'np. Recepcja — Biuro Kraków'} />
           </label>
           <label className="field">
             Ważny przez
@@ -161,7 +166,9 @@ export function Tokens() {
                 const used = t.usesLeft === 0;
                 return (
                   <tr key={t.id}>
-                    <td className="strong s-main">{t.label}</td>
+                    <td className="strong s-main">
+                      {t.label} {t.kind === 'kiosk' && <Badge variant="brand">Kiosk</Badge>}
+                    </td>
                     <td className="s-full">
                       <ClientLabel name={t.clientName} site={t.siteName} />
                     </td>

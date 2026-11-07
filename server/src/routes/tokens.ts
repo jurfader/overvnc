@@ -13,6 +13,8 @@ const CreateBody = z.object({
   maxUses: z.number().int().min(1).max(10_000).nullable().default(1),
   clientId: z.number().int().positive().nullable().default(null),
   siteId: z.number().int().positive().nullable().default(null),
+  // komputery z tego tokenu rejestrują się jako kioski („Dodaj kiosk”)
+  kind: z.enum(['computer', 'kiosk']).default('computer'),
 });
 const IdParams = z.object({ id: z.coerce.number().int().positive() });
 
@@ -24,7 +26,7 @@ export async function tokenRoutes(app: FastifyInstance, ctx: Ctx) {
     const where = scopeSql(req.user!, 't.client_id');
     return db
       .prepare(
-        `SELECT t.id, t.label, t.uses_left AS usesLeft, t.expires_at AS expiresAt, t.created_at AS createdAt, u.username AS createdBy,
+        `SELECT t.id, t.label, t.kind, t.uses_left AS usesLeft, t.expires_at AS expiresAt, t.created_at AS createdAt, u.username AS createdBy,
                 t.client_id AS clientId, c.name AS clientName, t.site_id AS siteId, s.name AS siteName
          FROM enroll_tokens t
          LEFT JOIN users u ON u.id = t.created_by
@@ -44,9 +46,9 @@ export async function tokenRoutes(app: FastifyInstance, ctx: Ctx) {
     const now = Date.now();
     const res = db
       .prepare(
-        'INSERT INTO enroll_tokens (token_hash, label, uses_left, expires_at, created_by, created_at, client_id, site_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO enroll_tokens (token_hash, label, uses_left, expires_at, created_by, created_at, client_id, site_id, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       )
-      .run(sha256(token), label, body.maxUses, now + body.ttlHours * 3600_000, req.user!.id, now, body.clientId, body.siteId);
+      .run(sha256(token), label, body.maxUses, now + body.ttlHours * 3600_000, req.user!.id, now, body.clientId, body.siteId, body.kind);
     const id = Number(res.lastInsertRowid);
     audit(db, actorOf(req), 'enroll_token.create', String(id), { label, ttlHours: body.ttlHours, maxUses: body.maxUses, clientId: body.clientId }, req.ip);
     // token w postaci jawnej zwracamy tylko raz — w bazie jest wyłącznie jego skrót

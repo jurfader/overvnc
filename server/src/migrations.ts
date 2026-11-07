@@ -318,4 +318,11 @@ export const MIGRATIONS: string[] = [
   INSERT INTO alert_rules (name, kind, threshold, duration_min, created_at) VALUES
     ('Krytyczny problem z zabezpieczeniami', 'security', 2, 0, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
   `,
+
+  // 12 — profil komputera: zwykły komputer albo kiosk (funkcje kiosku tylko na kioskach) (v0.20.0)
+  `
+  ALTER TABLE agents ADD COLUMN kind TEXT NOT NULL DEFAULT 'computer';      -- computer | kiosk
+  ALTER TABLE agents ADD COLUMN phone_app INTEGER NOT NULL DEFAULT 0;       -- kiosk: „Zdjęcia z telefonu”
+  ALTER TABLE enroll_tokens ADD COLUMN kind TEXT NOT NULL DEFAULT 'computer';
+  `,
 ];

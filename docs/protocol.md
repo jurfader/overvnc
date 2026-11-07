@@ -77,6 +77,7 @@ W `hello` agent wysyła listę obsługiwanych poleceń. Serwer odrzuca polecenie
 | Polecenie | Od wersji | Opis |
 |---|---|---|
 | `inventory.refresh` | 0.2.0 | zbiera i zwraca pełny inwentarz |
+| `agent.profile` `{kiosk, phoneApp}` | 0.20.0 | profil komputera (zwykły / kiosk) — serwer wysyła go po każdym połączeniu i po zmianie w panelu; agent zapisuje go w `profile.json` obok konfiguracji (funkcje kiosku działają też offline). Na Windows włączenie `phoneApp`: aplikacja w `AllowedApps` trybu kiosku (Assigned Access przez most WMI-MDM), kafelek „Zdjęcia z telefonu” w Start, `http://127.0.0.1` w `URLAllowlist` przeglądarki, jeśli ma listę blokad; odpowiedź `{ok, note}` z uwagą dla panelu (np. UWF włączony). |
 | `term.open` `{channel, cols, rows, shell}` | 0.4.0 | powłoka w PTY (ConPTY na Windows); limit 8 sesji na komputer |
 | `term.resize` `{channel, cols, rows}` | 0.4.0 | zmiana rozmiaru terminala |
 | `channel.close` `{channel}` | 0.4.0 | zamyka kanał (zabija proces) |
@@ -168,3 +169,7 @@ Każda odpowiedź błędu z API ma ten sam format:
 | 501 | `unsupported` | wersja agenta nie obsługuje funkcji |
 | 502 | `agent_disconnected` | agent rozłączył się w trakcie |
 | 504 | `agent_timeout` | agent nie odpowiedział na czas |
+
+### Zdjęcia z telefonu (kiosk, od 0.20.0)
+
+`overvnc-agent phone [browser=<ścieżka>]` — aplikacja klienta kiosku w jego sesji: serwer na `127.0.0.1` (losowy port, token w adresie okna), okno przeglądarki w trybie aplikacji (`--app`, osobny profil). Telefon przez powłokę Windows (urządzenia WPD w „Ten komputer”: IShellItem, miniatury z IShellItemImageFactory, kopiowanie i usuwanie przez IFileOperation na wątku STA). Zdjęcia z DCIM, Pictures, Download, WhatsApp, Telegram, Movies; kopie do Pobranych (kolizje nazw: „(2)”). Okno odpytuje serwer co kilka sekund — cisza = koniec procesu. Usługa agenta na kiosku z `phoneApp` co 2 s sprawdza urządzenia WPD (`CM_Get_Device_Interface_List`) i po podłączeniu nowego uruchamia aplikację jako zalogowany klient. Testy: `OVERVNC_PHONE_TEST_DIR` (folder zamiast telefonu), `OVERVNC_PHONE_SHELL_TEST` (zwykły folder przez kod powłoki), `phone selftest`.

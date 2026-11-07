@@ -6,6 +6,7 @@ import { randomToken, sha256 } from '../crypto.ts';
 import { HttpError, parse } from '../errors.ts';
 import { actorOf, requireUser } from '../auth.ts';
 import { assertAgentAccess, assertPlacement, scopeSql } from '../scope.ts';
+import { pushProfile } from '../profile.ts';
 
 const IdParams = z.object({ id: z.uuid() });
 const TagIds = z.array(z.number().int().positive()).max(100);
@@ -15,6 +16,9 @@ const PatchBody = z.object({
   clientId: z.number().int().positive().nullable().optional(),
   siteId: z.number().int().positive().nullable().optional(),
   tagIds: TagIds.optional(),
+  // profil: zwykły komputer albo kiosk; dla kiosku aplikacja „Zdjęcia z telefonu”
+  kind: z.enum(['computer', 'kiosk']).optional(),
+  phoneApp: z.boolean().optional(),
 });
 const BulkBody = z.object({
   ids: z.array(z.uuid()).min(1).max(1000),
@@ -107,7 +111,13 @@ export async function agentRoutes(app: FastifyInstance, ctx: Ctx) {
   app.patch('/api/agents/:id', manage, async (req) => {
     const { id, clientId: curClient } = access(req);
     const body = parse(PatchBody, req.body);
-    const cur = db.prepare('SELECT label, notes, site_id FROM agents WHERE id = ?').get(id) as { label: string; notes: string; site_id: number | null };
+    const cur = db.prepare('SELECT label, notes, site_id, kind, phone_app FROM agents WHERE id = ?').get(id) as {
+      label: string;
+      notes: string;
+      site_id: number | null;
+      kind: string;
+      phone_app: number;
+    };
 
     const clientId = body.clientId !== undefined ? body.clientId : curClient;
     // zmiana klienta bez podania lokalizacji czyści lokalizację (należała do starego klienta)
@@ -116,11 +126,13 @@ export async function agentRoutes(app: FastifyInstance, ctx: Ctx) {
     if (body.tagIds) assertTagsExist(body.tagIds);
 
     tx(db, () => {
-      db.prepare('UPDATE agents SET label = ?, notes = ?, client_id = ?, site_id = ? WHERE id = ?').run(
+      db.prepare('UPDATE agents SET label = ?, notes = ?, client_id = ?, site_id = ?, kind = ?, phone_app = ? WHERE id = ?').run(
         body.label ?? cur.label,
         body.notes ?? cur.notes,
         clientId,
         siteId,
+        body.kind ?? cur.kind,
+        body.phoneApp === undefined ? cur.phone_app : body.phoneApp ? 1 : 0,
         id,
       );
       if (body.tagIds) {
@@ -131,7 +143,16 @@ export async function agentRoutes(app: FastifyInstance, ctx: Ctx) {
     });
     audit(db, actorOf(req), 'agent.update', id, body, req.ip);
     pushUpdate(id);
-    return hub.summary(id);
+    // zmiana profilu: od razu do agenta (gdy offline — po połączeniu); uwaga agenta wraca do panelu
+    let note: string | null = null;
+    if ((body.kind !== undefined && body.kind !== cur.kind) || (body.phoneApp !== undefined && (body.phoneApp ? 1 : 0) !== cur.phone_app)) {
+      try {
+        note = await pushProfile(db, hub, id);
+      } catch (e) {
+        note = `Komputer nie zastosował profilu: ${(e as Error).message}`;
+      }
+    }
+    return { ...hub.summary(id), profileNote: note };
   });
 
   app.post('/api/agents/bulk', manage, async (req) => {
@@ -198,8 +219,8 @@ export async function agentRoutes(app: FastifyInstance, ctx: Ctx) {
     const now = Date.now();
 
     const result = tx(db, () => {
-      const t = db.prepare('SELECT id, label, uses_left, expires_at, client_id, site_id FROM enroll_tokens WHERE token_hash = ?').get(sha256(body.token)) as
-        | { id: number; label: string; uses_left: number | null; expires_at: number; client_id: number | null; site_id: number | null }
+      const t = db.prepare('SELECT id, label, uses_left, expires_at, client_id, site_id, kind FROM enroll_tokens WHERE token_hash = ?').get(sha256(body.token)) as
+        | { id: number; label: string; uses_left: number | null; expires_at: number; client_id: number | null; site_id: number | null; kind: string }
         | undefined;
       if (!t || t.expires_at < now || (t.uses_left !== null && t.uses_left <= 0)) return null;
       if (t.uses_left !== null) db.prepare('UPDATE enroll_tokens SET uses_left = uses_left - 1 WHERE id = ?').run(t.id);
@@ -207,8 +228,8 @@ export async function agentRoutes(app: FastifyInstance, ctx: Ctx) {
       const agentId = crypto.randomUUID();
       const secret = randomToken(32);
       db.prepare(
-        'INSERT INTO agents (id, secret_hash, hostname, label, os, arch, enrolled_at, last_ip, client_id, site_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      ).run(agentId, sha256(secret), body.hostname, labelFromToken(t.label), body.os, body.arch, now, req.ip, t.client_id, t.site_id);
+        'INSERT INTO agents (id, secret_hash, hostname, label, os, arch, enrolled_at, last_ip, client_id, site_id, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      ).run(agentId, sha256(secret), body.hostname, labelFromToken(t.label), body.os, body.arch, now, req.ip, t.client_id, t.site_id, t.kind);
       return { agentId, secret, tokenLabel: t.label };
     });
 

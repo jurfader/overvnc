@@ -9,6 +9,7 @@ import { OrganizeModal } from './organize.tsx';
 import { ChangesView, SecurityShield, SecurityView } from './protection.tsx';
 import { MonitoringView } from './remote/MonitoringView.tsx';
 import { KioskCard } from './remote/KioskCard.tsx';
+import { PhoneAppCard } from './remote/PhoneAppCard.tsx';
 import { WindowsCard } from './remote/WindowsCard.tsx';
 import { ProcessesView } from './remote/ProcessesView.tsx';
 import { ServicesView } from './remote/ServicesView.tsx';
@@ -109,8 +110,8 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
     <>
       <header className="page-head anim-rise">
         <div>
-          <a href="#/" className="back">
-            <ArrowLeft /> Komputery
+          <a href={a.kind === 'kiosk' ? '#/kiosks' : '#/'} className="back">
+            <ArrowLeft /> {a.kind === 'kiosk' ? 'Kioski' : 'Komputery'}
           </a>
           <h1>
             {name} <Status online={a.online} />
@@ -252,6 +253,7 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
         </section>
 
         {remote && <KioskCard agent={a} />}
+        {a.kind === 'kiosk' && a.os === 'windows' && <PhoneAppCard agent={a} />}
         {inv?.windows && <WindowsCard agent={a} win={inv.windows} />}
 
         <section className="glass-card card anim-rise" style={{ animationDelay: '140ms' }}>

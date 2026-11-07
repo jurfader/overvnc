@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { AlertTriangle, Building2, FileTerminal, FilterX, MessageSquareText, Monitor, PlusCircle, Power, RotateCw, Search, Tag as TagIcon, Wifi, X } from 'lucide-react';
-import type { Agent } from '../api.ts';
+import { AlertTriangle, Building2, FileTerminal, FilterX, MessageSquareText, Monitor, PlusCircle, Power, RotateCw, Search, Store, Tag as TagIcon, Wifi, X } from 'lucide-react';
+import type { Agent, AgentKind } from '../api.ts';
 import { Badge, Button, Checkbox, ClientLabel, EmptyState, Meter, OsBadge, osIcon, StatTile, Status, TagChip } from '../components.tsx';
 import { ago, bytes, platformLabel, plural } from '../format.ts';
 import { useAlerts, useMe, useOrg } from '../state.tsx';
@@ -14,7 +14,8 @@ type StatusFilter = 'all' | 'online' | 'offline' | 'alert';
 
 const NONE = -1; // filtr „bez klienta”
 
-export function Machines({ agents, initialClient }: { agents: Agent[]; initialClient: number | null }) {
+export function Machines({ agents, initialClient, kind = 'computer' }: { agents: Agent[]; initialClient: number | null; kind?: AgentKind }) {
+  const kiosk = kind === 'kiosk';
   const { can, me } = useMe();
   const { clients, tags } = useOrg();
   const { byAgent } = useAlerts();
@@ -87,15 +88,21 @@ export function Machines({ agents, initialClient }: { agents: Agent[]; initialCl
   if (agents.length === 0)
     return (
       <>
-        <PageHead />
+        <PageHead kiosk={kiosk} />
         <EmptyState
-          icon={Monitor}
-          title="Brak komputerów"
-          text={me.allClients ? 'Utwórz token rejestracji i zainstaluj agenta OVERVNC na pierwszym komputerze.' : 'Twoi klienci nie mają jeszcze komputerów.'}
+          icon={kiosk ? Store : Monitor}
+          title={kiosk ? 'Brak kiosków' : 'Brak komputerów'}
+          text={
+            kiosk
+              ? 'Dodaj kiosk tokenem kioskowym albo oznacz istniejący komputer jako kiosk (Edytuj → Rodzaj).'
+              : me.allClients
+                ? 'Utwórz token rejestracji i zainstaluj agenta OVERVNC na pierwszym komputerze.'
+                : 'Twoi klienci nie mają jeszcze komputerów.'
+          }
         >
           {can('tokens.manage') && (
-            <a className="btn btn-primary" href="#/tokens">
-              <PlusCircle /> Dodaj pierwszy komputer
+            <a className="btn btn-primary" href={kiosk ? '#/tokens?kind=kiosk' : '#/tokens'}>
+              <PlusCircle /> {kiosk ? 'Dodaj kiosk' : 'Dodaj pierwszy komputer'}
             </a>
           )}
         </EmptyState>
@@ -104,10 +111,16 @@ export function Machines({ agents, initialClient }: { agents: Agent[]; initialCl
 
   return (
     <>
-      <PageHead />
+      <PageHead kiosk={kiosk}>
+        {kiosk && can('tokens.manage') && (
+          <a className="btn btn-primary" href="#/tokens?kind=kiosk">
+            <PlusCircle /> Dodaj kiosk
+          </a>
+        )}
+      </PageHead>
 
       <section className="grid grid-stats">
-        <StatTile icon={Monitor} label="Wszystkie komputery" value={agents.length} hint={clients.length ? `u ${clients.length} ${plural(clients.length, 'klienta', 'klientów', 'klientów')}` : 'zarejestrowane w panelu'} />
+        <StatTile icon={kiosk ? Store : Monitor} label={kiosk ? 'Wszystkie kioski' : 'Wszystkie komputery'} value={agents.length} hint={clients.length ? `u ${clients.length} ${plural(clients.length, 'klienta', 'klientów', 'klientów')}` : 'zarejestrowane w panelu'} />
         <StatTile icon={Wifi} label="Online" value={online} hint={`${agents.length ? Math.round((online / agents.length) * 100) : 0}% floty`} delay={40} />
         <StatTile icon={Power} label="Offline" value={agents.length - online} hint="wyłączone lub bez sieci" delay={80} />
         <StatTile icon={AlertTriangle} label="Wymagają uwagi" value={alerting} hint="mają otwarte alerty" delay={120} />
@@ -328,12 +341,12 @@ export function Machines({ agents, initialClient }: { agents: Agent[]; initialCl
   );
 }
 
-function PageHead({ children }: { children?: ReactNode }) {
+function PageHead({ children, kiosk }: { children?: ReactNode; kiosk?: boolean }) {
   return (
     <header className="page-head anim-rise">
       <div>
-        <h1>Komputery</h1>
-        <div className="sub">Stan wszystkich zarządzanych komputerów na żywo</div>
+        <h1>{kiosk ? 'Kioski' : 'Komputery'}</h1>
+        <div className="sub">{kiosk ? 'Stanowiska dla klientów — stan na żywo i funkcje kiosku' : 'Stan wszystkich zarządzanych komputerów na żywo'}</div>
       </div>
       {children && <div className="toolbar">{children}</div>}
     </header>

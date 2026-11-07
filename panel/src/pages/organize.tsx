@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, errorMessage, type Agent } from '../api.ts';
+import { api, errorMessage, type Agent, type AgentKind } from '../api.ts';
 import { Button, Field, Modal, TagChip, toast } from '../components.tsx';
 import { useMe, useOrg } from '../state.tsx';
 import { plural } from '../format.ts';
@@ -82,6 +82,7 @@ export function OrganizeModal({ agent, open, onClose }: { agent: Agent; open: bo
   const [siteId, setSiteId] = useState<number | null>(null);
   const [tagIds, setTagIds] = useState<number[]>([]);
   const [notes, setNotes] = useState('');
+  const [kind, setKind] = useState<AgentKind>('computer');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -92,6 +93,7 @@ export function OrganizeModal({ agent, open, onClose }: { agent: Agent; open: bo
     setSiteId(agent.siteId);
     setTagIds(agent.tags.map((t) => t.id));
     setNotes(agent.notes);
+    setKind(agent.kind ?? 'computer');
     setError('');
     // tylko przy otwarciu: dane komputera odświeżają się na żywo (metryki co kilka sekund)
     // i nadpisywałyby to, co ktoś właśnie wpisuje
@@ -103,8 +105,8 @@ export function OrganizeModal({ agent, open, onClose }: { agent: Agent; open: bo
     setBusy(true);
     setError('');
     try {
-      await api.updateAgent(agent.id, { label: label.trim(), clientId, siteId, tagIds, notes });
-      toast('Zapisano');
+      const r = await api.updateAgent(agent.id, { label: label.trim(), clientId, siteId, tagIds, notes, kind });
+      toast(r.profileNote ? `Zapisano. ${r.profileNote}` : 'Zapisano');
       onClose();
     } catch (err) {
       setError(errorMessage(err));
@@ -121,6 +123,20 @@ export function OrganizeModal({ agent, open, onClose }: { agent: Agent; open: bo
           <input className="pole" value={label} onChange={(e) => setLabel(e.target.value)} placeholder={agent.hostname} maxLength={100} autoFocus />
         </Field>
         <PlacementFields clientId={clientId} siteId={siteId} allowNone={me.allClients} onChange={(c, s) => (setClientId(c), setSiteId(s))} />
+        <Field label="Rodzaj" group hint={kind === 'kiosk' ? 'Kiosk: osobna lista „Kioski” i funkcje kiosku (m.in. „Zdjęcia z telefonu”).' : undefined}>
+          <div className="seg" role="radiogroup" aria-label="Rodzaj">
+            {(
+              [
+                ['computer', 'Komputer'],
+                ['kiosk', 'Kiosk'],
+              ] as const
+            ).map(([k, l]) => (
+              <button key={k} type="button" role="radio" aria-checked={kind === k} className={`seg-btn ${kind === k ? 'on' : ''}`} onClick={() => setKind(k)}>
+                {l}
+              </button>
+            ))}
+          </div>
+        </Field>
         <Field label="Tagi" group>
           <TagPicker value={tagIds} onChange={setTagIds} />
         </Field>
