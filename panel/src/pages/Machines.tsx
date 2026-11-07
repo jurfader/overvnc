@@ -7,6 +7,7 @@ import { useAlerts, useChatUnread, useMe, useOrg } from '../state.tsx';
 import { BulkModal, type BulkMode } from './organize.tsx';
 import { NewJobModal } from './Jobs.tsx';
 import { SecurityShield } from './protection.tsx';
+import { PowerCountdownPill } from './remote/PowerMenu.tsx';
 import type { JobKind } from '../api.ts';
 
 type StatusFilter = 'all' | 'online' | 'offline' | 'alert';
@@ -275,6 +276,7 @@ export function Machines({ agents, initialClient, kind = 'computer' }: { agents:
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'inherit' }}>
                         <Status online={a.online} reason={a.offlineReason} />
                         <SecurityShield security={a.security} />
+                        <PowerCountdownPill pending={a.powerPending} />
                         {(chatUnread.get(a.id) ?? 0) > 0 && (
                           <a href={`#/m/${a.id}/chat`} className="chat-pill" onClick={(e) => e.stopPropagation()} title="Nieprzeczytane wiadomości od użytkownika">
                             <MessageCircle /> {chatUnread.get(a.id)}

@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { Db } from './db.ts';
 import { HttpError } from './errors.ts';
 import type { Hub } from './hub.ts';
+import { requestPower } from './power.ts';
 
 /**
  * Zadania: jedno polecenie (skrypt, komunikat, restart…) na wielu komputerach, wykonywane przez serwer w tle —
@@ -176,7 +177,7 @@ export class JobRunner {
         break;
       case 'power': {
         const pw = p as PowerParams;
-        req = this.hub.request(t.agent_id, 'power.action', pw, { capability: `power.${pw.action}`, timeoutMs: 30_000 });
+        req = requestPower(this.hub, t.agent_id, pw, 30_000);
         break;
       }
       case 'inventory':

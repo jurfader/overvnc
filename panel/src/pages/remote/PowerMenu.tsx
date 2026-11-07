@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ChevronDown, Lock, LogOut, Power, PowerOff, RotateCcw, Sunrise, TimerOff } from 'lucide-react';
-import { api, errorMessage, type Agent, type PowerAction } from '../../api.ts';
+import { api, errorMessage, type Agent, type PowerAction, type PowerPending } from '../../api.ts';
 import { Button, Field, Modal, toast, useDismiss } from '../../components.tsx';
+import { useMe } from '../../state.tsx';
 
 const ITEMS: { action: PowerAction; label: string; icon: typeof Power; danger?: boolean }[] = [
   { action: 'reboot', label: 'Uruchom ponownie…', icon: RotateCcw },
@@ -198,5 +199,108 @@ export function WakeButton({ agent }: { agent: Agent }) {
         </div>
       </Modal>
     </>
+  );
+}
+
+// ---------- odliczanie do zaplanowanego restartu / wyłączenia ----------
+
+/** Po terminie (z zapasem na zamykanie systemu) plan jest nieaktualny — jak na serwerze. */
+const PENDING_GRACE_MS = 2 * 60_000;
+
+/** Aktualny czas odświeżany co sekundę (tylko gdy `on`). */
+function useNow(on: boolean): number {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!on) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [on]);
+  return now;
+}
+
+export function formatCountdown(ms: number): string {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  const mm = String(Math.floor(s / 60) % 60).padStart(2, '0');
+  const ss = String(s % 60).padStart(2, '0');
+  return s >= 3600 ? `${Math.floor(s / 3600)}:${mm}:${ss}` : `${Math.floor(s / 60)}:${ss}`;
+}
+
+/** Plan aktualny w chwili `now` (null — brak albo po terminie z zapasem). */
+function livePending(p: PowerPending | null | undefined, now: number): PowerPending | null {
+  return p && p.at + PENDING_GRACE_MS > now ? p : null;
+}
+
+const time = (ts: number) => new Date(ts).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' });
+
+/** Pasek „Zaplanowany restart — za 14:32” na stronie komputera (z anulowaniem). */
+export function PowerCountdownBanner({ agent }: { agent: Agent }) {
+  const { can } = useMe();
+  const now = useNow(!!agent.powerPending);
+  const [busy, setBusy] = useState(false);
+  const p = livePending(agent.powerPending, now);
+  if (!p) return null;
+  const left = p.at - now;
+  const reboot = p.action === 'reboot';
+  const Icon = reboot ? RotateCcw : Power;
+  // okienko z odliczaniem na ekranie: Windows z agentem 0.23.0+ (inne systemy — komunikat systemu)
+  const notice = agent.os === 'windows' && agent.capabilities.includes('power.pending');
+  const due = left <= 0;
+  const canCancel = !due && agent.online && can('agents.remote') && agent.capabilities.includes('power.cancel');
+  const cancel = async () => {
+    setBusy(true);
+    try {
+      await api.power(agent.id, 'cancel');
+      toast(reboot ? 'Restart anulowany' : 'Wyłączenie anulowane');
+    } catch (err) {
+      toast(errorMessage(err), 'err');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className={`power-banner anim-rise ${left <= 60_000 ? 'urgent' : ''}`} role="status">
+      <span className="power-banner-icon">
+        <Icon />
+      </span>
+      <div className="power-banner-body">
+        <div className="power-banner-title">
+          {due ? (reboot ? 'Komputer uruchamia się ponownie…' : 'Komputer się wyłącza…') : reboot ? 'Zaplanowany restart' : 'Zaplanowane wyłączenie'}
+        </div>
+        <div className="small muted">
+          {due
+            ? reboot
+              ? 'Wróci online za chwilę.'
+              : 'Włączenie fizycznie albo przez Wake-on-LAN.'
+            : `o ${time(p.at)}${notice ? ' · użytkownik widzi odliczanie i prośbę o zapisanie pracy' : ''}`}
+          {p.message && !due && <> · „{p.message}”</>}
+        </div>
+      </div>
+      {!due && (
+        <span className="power-banner-count" aria-label={`Pozostało ${formatCountdown(left)}`}>
+          {formatCountdown(left)}
+        </span>
+      )}
+      {canCancel && (
+        <Button size="sm" icon={TimerOff} loading={busy} onClick={() => void cancel()}>
+          Anuluj
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** Mała plakietka na liście komputerów. */
+export function PowerCountdownPill({ pending }: { pending: PowerPending | null | undefined }) {
+  const now = useNow(!!pending);
+  const p = livePending(pending, now);
+  if (!p) return null;
+  const left = p.at - now;
+  const Icon = p.action === 'reboot' ? RotateCcw : Power;
+  const what = p.action === 'reboot' ? 'Restart' : 'Wyłączenie';
+  return (
+    <span className={`power-pill ${left <= 60_000 ? 'urgent' : ''}`} title={`${what} o ${time(p.at)}`}>
+      <Icon /> {left > 0 ? formatCountdown(left) : what + '…'}
+    </span>
   );
 }

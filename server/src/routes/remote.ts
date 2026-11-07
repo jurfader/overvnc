@@ -7,6 +7,7 @@ import { actorOf, requireUser } from '../auth.ts';
 import { assertAgentAccess, canSeeClient } from '../scope.ts';
 import { planWake, wakeMacs, type WolHost } from '../wol.ts';
 import type { AgentRow } from '../hub.ts';
+import { requestPower } from '../power.ts';
 
 const IdParams = z.object({ id: z.uuid() });
 const PidParams = z.object({ id: z.uuid(), pid: z.coerce.number().int().positive() });
@@ -77,7 +78,7 @@ export async function remoteRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post('/api/agents/:id/power', remote, async (req) => {
     const id = access(req);
     const body = parse(PowerBody, req.body);
-    await hub.request(id, 'power.action', body, { capability: `power.${body.action}` });
+    await requestPower(hub, id, body);
     audit(db, actorOf(req), `power.${body.action}`, id, { delayMinutes: body.delayMinutes, message: body.message || undefined }, req.ip);
     return { ok: true };
   });

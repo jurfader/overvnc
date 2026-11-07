@@ -30,9 +30,10 @@ func runAgent(ctx context.Context, cfgPath string, cfg *Config) {
 	go updateLoop(ctx, cfg, cfgPath)
 	go resumeKioskTask(ctx) // np. przedłużanie okresu próbnego przerwane restartem
 	go runUpdatesChecker(ctx)
-	go runPhoneWatcher(ctx) // kiosk: „Zdjęcia z telefonu” po podłączeniu telefonu
-	go runKioskSession(ctx) // kiosk: „Zakończ i usuń moje dane”
-	go runTrayService(ctx)  // zwykłe komputery: ikona w zasobniku z czatem
+	go runPhoneWatcher(ctx)       // kiosk: „Zdjęcia z telefonu” po podłączeniu telefonu
+	go runKioskSession(ctx)       // kiosk: „Zakończ i usuń moje dane”
+	go runTrayService(ctx)        // zwykłe komputery: ikona w zasobniku z czatem
+	go runPowerNoticeService(ctx) // odliczanie do zaplanowanego restartu na ekranie użytkownika
 	backoff := time.Second
 	for {
 		started := time.Now()
@@ -192,6 +193,7 @@ func session(parent context.Context, cfg *Config, cfgPath string) error {
 			"shells":       availableShells(),
 			"runAs":        currentUser(),
 			"inventory":    collectInventory(ctx),
+			"powerPending": currentPowerPending().view(),
 		}
 		if err := send("hello", hello); err != nil {
 			fail(err)
@@ -237,6 +239,8 @@ func session(parent context.Context, cfg *Config, cfgPath string) error {
 				err = send("audit", ev)
 			case <-chatNow:
 				err = flushChat(send)
+			case <-powerNow:
+				err = send("power", map[string]any{"pending": currentPowerPending().view()})
 			}
 			if err != nil {
 				fail(err)

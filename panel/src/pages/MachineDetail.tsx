@@ -15,7 +15,7 @@ import { WindowsCard } from './remote/WindowsCard.tsx';
 import { ProcessesView } from './remote/ProcessesView.tsx';
 import { ServicesView } from './remote/ServicesView.tsx';
 import { FilesView } from './remote/FilesView.tsx';
-import { PowerMenu, WakeButton } from './remote/PowerMenu.tsx';
+import { PowerCountdownBanner, PowerMenu, WakeButton } from './remote/PowerMenu.tsx';
 import { ago, bytes, dateTime, duration, platformLabel, rate } from '../format.ts';
 
 // xterm.js waży ~400 kB — ładujemy go dopiero przy otwarciu terminala
@@ -191,6 +191,8 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
           </span>
         </div>
       </header>
+
+      <PowerCountdownBanner agent={a} />
 
       {remote && <NewJobModal open={scriptOpen} onClose={() => setScriptOpen(false)} agents={[a]} preselected={[id]} />}
 

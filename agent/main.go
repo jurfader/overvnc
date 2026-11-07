@@ -124,6 +124,10 @@ func main() {
 		// kiosk: to samo z kafelka w menu Start
 		os.Exit(runSessionEnd())
 
+	case "power-notice":
+		// okienko z odliczaniem do zaplanowanego restartu/wyłączenia (uruchamia je usługa w sesji użytkownika)
+		os.Exit(runPowerNotice(fs.Args()))
+
 	case "tray":
 		// ikona OVERVNC w zasobniku z czatem ze wsparciem (uruchamia ją usługa w sesji użytkownika)
 		os.Exit(runTray())

@@ -76,6 +76,13 @@ export interface NotificationSettings {
 }
 
 
+export interface PowerPending {
+  action: 'reboot' | 'shutdown';
+  /** termin (ms) */
+  at: number;
+  message: string;
+}
+
 /** Wiadomość czatu: in — od użytkownika komputera, out — od wsparcia. */
 export interface ChatMessage {
   id: number;
@@ -128,6 +135,8 @@ export interface Agent {
   /** kiosk: udział Pobrane dla pracowników — off | read | delete; adresy (puste = sieć lokalna) */
   shareMode: 'off' | 'read' | 'delete';
   shareAllow: string;
+  /** zaplanowany restart / wyłączenie (odliczanie); null — brak */
+  powerPending?: PowerPending | null;
   /** tylko po stronie panelu: zmienia się, gdy serwer zgłosi nowe dane inwentarza */
   rev?: number;
 }

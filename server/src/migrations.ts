@@ -357,4 +357,9 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX chat_agent ON chat_messages(agent_id, id DESC);
   `,
+
+  // 17 — zaplanowany restart / wyłączenie (odliczanie w panelu i na komputerze) (v0.23.0)
+  `
+  ALTER TABLE agents ADD COLUMN power_pending TEXT;   -- JSON {action, at, message} albo NULL
+  `,
 ];

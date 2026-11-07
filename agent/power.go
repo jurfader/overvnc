@@ -48,7 +48,8 @@ func handlePower(ctx context.Context, data json.RawMessage) (any, error) {
 	if err := doPower(ctx, req); err != nil {
 		return nil, err
 	}
-	return map[string]bool{"ok": true}, nil
+	powerScheduled(req)
+	return map[string]any{"ok": true, "pending": currentPowerPending().view()}, nil
 }
 
 func init() {
@@ -61,6 +62,8 @@ func extraCapabilities() []string {
 	for _, a := range supportedPowerActions() {
 		out = append(out, "power."+a)
 	}
+	// agent sam zgłasza zaplanowany restart/wyłączenie (zdarzenie "power" i pole hello.powerPending)
+	out = append(out, "power.pending")
 	if userScriptsSupported() {
 		out = append(out, "script.user")
 	}

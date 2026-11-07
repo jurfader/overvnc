@@ -115,6 +115,28 @@ export interface AgentSummary {
   /** kiosk: udział Pobrane dla pracowników (off | read | delete) i adresy, z których wolno (puste = sieć lokalna) */
   shareMode: string;
   shareAllow: string;
+  /** zaplanowany restart / wyłączenie (odliczanie); null — brak */
+  powerPending: PowerPending | null;
+}
+
+export interface PowerPending {
+  action: 'reboot' | 'shutdown';
+  /** termin (ms, zegar serwera) */
+  at: number;
+  message: string;
+}
+
+/** Po terminie (z zapasem na zamykanie systemu) plan jest nieaktualny. */
+export const POWER_PENDING_GRACE_MS = 2 * 60_000;
+
+/** Plan od agenta ({action, remainingSec, message}) — termin liczony zegarem serwera. */
+export function parsePowerPending(v: unknown, now = Date.now()): PowerPending | null {
+  if (!v || typeof v !== 'object') return null;
+  const d = v as { action?: unknown; remainingSec?: unknown; at?: unknown; message?: unknown };
+  if (d.action !== 'reboot' && d.action !== 'shutdown') return null;
+  const sec = Number(d.remainingSec);
+  if (!Number.isFinite(sec) || sec < 0 || sec > 24 * 3600 + 60) return null;
+  return { action: d.action, at: now + Math.round(sec) * 1000, message: typeof d.message === 'string' ? d.message.slice(0, 200) : '' };
 }
 
 export interface TagRef {
@@ -166,6 +188,18 @@ export interface AgentRow {
   offline_reason: string | null;
   share_mode: string;
   share_allow: string;
+  power_pending: string | null;
+}
+
+/** Plan z bazy — null, gdy brak albo po terminie. */
+function livePending(raw: string | null): PowerPending | null {
+  if (!raw) return null;
+  try {
+    const p = JSON.parse(raw) as PowerPending;
+    return p.at + POWER_PENDING_GRACE_MS > Date.now() ? p : null;
+  } catch {
+    return null;
+  }
 }
 
 type SummaryRow = AgentRow & { client_name: string | null; client_color: string | null; site_name: string | null };
@@ -280,6 +314,13 @@ export class Hub {
         conn.runAs = str(d.runAs);
         this.db.prepare('UPDATE agents SET agent_version = ?, last_seen = ? WHERE id = ?').run(str(d.version), now, agentId);
         if (d.inventory) this.storeInventory(agentId, d.inventory);
+        // zaplanowany restart: nowsze agenty zgłaszają go same; u starszych plan z panelu wygasa po terminie
+        if (conn.capabilities.includes('power.pending')) this.setPowerPending(agentId, parsePowerPending((d as { powerPending?: unknown }).powerPending), false);
+        else {
+          // starszy agent wrócił po terminie — restart się odbył
+          const at = livePending(this.powerPendingRaw(agentId))?.at;
+          if (at === undefined || at <= now) this.setPowerPending(agentId, null, false);
+        }
         this.broadcastAgent(agentId, { type: 'agent_updated', id: agentId, data: this.summary(agentId) });
         this.notify('ready', agentId);
         break;
@@ -293,6 +334,11 @@ export class Hub {
         // agent kończy pracę planowo (wyłączenie komputera, zatrzymanie usługi, aktualizacja)
         const reason = str((msg.data as { reason?: unknown } | undefined)?.reason);
         if (PLANNED_OFFLINE.has(reason)) conn.bye = reason;
+        break;
+      }
+      case 'power': {
+        // agent zmienił plan restartu/wyłączenia (zlecenie z panelu, anulowanie)
+        this.setPowerPending(agentId, parsePowerPending((msg.data as { pending?: unknown } | undefined)?.pending));
         break;
       }
       case 'chat': {
@@ -551,6 +597,18 @@ export class Hub {
     }
   }
 
+  // ---------- zaplanowany restart / wyłączenie ----------
+
+  private powerPendingRaw(agentId: string): string | null {
+    return (this.db.prepare('SELECT power_pending FROM agents WHERE id = ?').get(agentId) as { power_pending: string | null } | undefined)?.power_pending ?? null;
+  }
+
+  /** Zapis planu (odliczanie w panelu); broadcast — gdy zmiana ma być od razu widoczna. */
+  setPowerPending(agentId: string, p: PowerPending | null, broadcast = true): void {
+    this.db.prepare('UPDATE agents SET power_pending = ? WHERE id = ?').run(p ? JSON.stringify(p) : null, agentId);
+    if (broadcast) this.broadcastAgent(agentId, { type: 'agent_updated', id: agentId, data: this.summary(agentId) });
+  }
+
   // ---------- odczyt ----------
 
   summary(agentId: string): AgentSummary | null {
@@ -610,6 +668,7 @@ export class Hub {
       endButton: !!r.end_button,
       shareMode: r.share_mode ?? 'off',
       shareAllow: r.share_allow ?? '',
+      powerPending: livePending(r.power_pending),
     };
   }
 
