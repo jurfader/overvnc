@@ -242,8 +242,5 @@ func setupKioskApps(ctx context.Context, phone, endButton bool) (browser, note s
 	case "nokiosk":
 		note = "Na tym komputerze nie ma trybu kiosku (Assigned Access) — kafelki są w menu Start."
 	}
-	if st := collectWinStatus(ctx); st != nil && st.UWF != nil && st.UWF.Enabled {
-		note += " Uwaga: ochrona przed zapisem (UWF) jest włączona — zmiana zniknie po restarcie. Wyłącz UWF, zapisz ponownie, potem włącz UWF."
-	}
 	return r.Browser, strings.TrimSpace(note), nil
 }

@@ -1,7 +1,7 @@
 import type { Db } from './db.ts';
-import type { Hub } from './hub.ts';
 import type { Notifier } from './notify.ts';
 import { SEVERITY_RANK, type SecuritySummary } from './security.ts';
+import { PLANNED_OFFLINE, type Hub } from './hub.ts';
 
 export const ALERT_KINDS = ['offline', 'cpu', 'mem', 'disk', 'license', 'security'] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
@@ -51,6 +51,7 @@ interface AgentInfo {
   client_id: number | null;
   client_name: string | null;
   last_seen: number | null;
+  offline_reason?: string | null;
 }
 
 const pct = (v: number) => `${Math.round(v)}%`;
@@ -220,7 +221,7 @@ export class AlertEngine {
     const offlineRules = this.rules.filter((r) => r.kind === 'offline');
     if (offlineRules.length === 0) return;
     const agents = this.db
-      .prepare('SELECT a.id, a.hostname, a.label, a.client_id, c.name AS client_name, a.last_seen FROM agents a LEFT JOIN clients c ON c.id = a.client_id')
+      .prepare('SELECT a.id, a.hostname, a.label, a.client_id, c.name AS client_name, a.last_seen, a.offline_reason FROM agents a LEFT JOIN clients c ON c.id = a.client_id')
       .all() as unknown as AgentInfo[];
     for (const a of agents) {
       const online = this.hub.isOnline(a.id);
@@ -230,6 +231,8 @@ export class AlertEngine {
           if (this.open.has(key)) this.resolve(key, rule, a, now, online);
           continue;
         }
+        // komputer wyłączony normalnie (agent się pożegnał) — nie awaria; próg 1 = zgłaszaj także takie
+        if (rule.threshold < 1 && a.offline_reason && PLANNED_OFFLINE.has(a.offline_reason)) continue;
         if (this.open.has(key) || a.last_seen == null) continue; // nigdy niepołączony — pomijamy
         // po starcie serwera agenci potrzebują chwili na ponowne połączenie — liczymy od startu
         const offlineSince = Math.max(a.last_seen, this.startedAt);

@@ -330,4 +330,9 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE agents ADD COLUMN end_button INTEGER NOT NULL DEFAULT 0;
   `,
+
+  // 14 — powód rozłączenia: shutdown / stopped / update (agent się pożegnał) albo lost (zerwane) (v0.20.1)
+  `
+  ALTER TABLE agents ADD COLUMN offline_reason TEXT;
+  `,
 ];

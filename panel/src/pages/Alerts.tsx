@@ -200,7 +200,7 @@ export function AlertTable({ items, history = false, empty, compact = false }: {
 
 function describeRule(r: AlertRule): string {
   const dur = r.durationMin ? ` przez ${r.durationMin} min` : ' (od razu)';
-  if (r.kind === 'offline') return `Brak połączenia przez ${r.durationMin} min`;
+  if (r.kind === 'offline') return `Brak połączenia przez ${r.durationMin} min${r.threshold >= 1 ? ' (także wyłączone komputery)' : ' (pomija wyłączone komputery)'}`;
   if (r.kind === 'license') return `Wersja próbna Windows: ≤ ${r.threshold} dni do końca`;
   if (r.kind === 'security') return r.threshold >= 2 ? 'Krytyczne problemy (antywirus, zapora, SIP)' : 'Krytyczne problemy i ostrzeżenia (też poprawki, restart)';
   return `${KIND_LABEL[r.kind]} ≥ ${r.threshold}%${dur}`;
@@ -425,9 +425,11 @@ function RuleModal({ rule, onClose, onSaved }: { rule: AlertRule | null | undefi
                             ? 14
                             : o.value === 'security'
                               ? 2
-                              : f.kind === 'license' || f.kind === 'security'
-                                ? 90
-                                : f.threshold,
+                              : o.value === 'offline'
+                                ? 0
+                                : f.kind === 'license' || f.kind === 'security' || f.kind === 'offline'
+                                  ? 90
+                                  : f.threshold,
                     })
                   }
                 />
@@ -454,6 +456,17 @@ function RuleModal({ rule, onClose, onSaved }: { rule: AlertRule | null | undefi
           {f.kind !== 'offline' && f.kind !== 'security' && (
             <Field label={f.kind === 'license' ? 'Alert, gdy do końca zostało dni (≤)' : 'Próg (%)'}>
               <input className="pole" type="number" min={1} max={f.kind === 'license' ? 90 : 100} value={f.threshold} onChange={(e) => set({ threshold: Number(e.target.value) })} required />
+            </Field>
+          )}
+          {f.kind === 'offline' && (
+            <Field label="Wyłączone komputery" group>
+              <label className={`choice ${f.threshold >= 1 ? 'on' : ''}`}>
+                <input type="checkbox" checked={f.threshold >= 1} onChange={(e) => set({ threshold: e.target.checked ? 1 : 0 })} />
+                <span>
+                  Zgłaszaj także normalnie wyłączone
+                  <small>Domyślnie alert jest tylko przy zerwanym połączeniu (sieć, zawieszenie, odcięty prąd) — komputer wyłączony przez Start nie alarmuje.</small>
+                </span>
+              </label>
             </Field>
           )}
           {f.kind !== 'license' && f.kind !== 'security' && (

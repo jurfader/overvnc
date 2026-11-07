@@ -38,7 +38,12 @@ interface AgentConn {
   capabilities: string[];
   shells: string[];
   runAs: string;
+  /** powód z pożegnania agenta (shutdown / stopped / update) — brak = połączenie zerwane */
+  bye?: string;
 }
+
+/** Powody planowanego rozłączenia — reguła „Komputer offline” domyślnie ich nie zgłasza. */
+export const PLANNED_OFFLINE = new Set(['shutdown', 'stopped', 'update']);
 
 /** Odbiorca strumienia (np. terminal w przeglądarce). */
 export interface ChannelSink {
@@ -101,6 +106,8 @@ export interface AgentSummary {
   security: SecuritySummary | null;
   /** profil: zwykły komputer albo kiosk */
   kind: 'computer' | 'kiosk';
+  /** offline: shutdown (wyłączony) / stopped / update / lost (zerwane połączenie); null — online albo brak danych */
+  offlineReason: string | null;
   /** kiosk: aplikacja „Zdjęcia z telefonu” */
   phoneApp: boolean;
   /** kiosk: przycisk „Zakończ i usuń moje dane” */
@@ -151,6 +158,7 @@ export interface AgentRow {
   kind: string;
   phone_app: number;
   end_button: number;
+  offline_reason: string | null;
 }
 
 type SummaryRow = AgentRow & { client_name: string | null; client_color: string | null; site_name: string | null };
@@ -221,7 +229,7 @@ export class Hub {
 
     const conn: AgentConn = { socket, ip, connectedAt: Date.now(), alive: true, protocol: 0, capabilities: [], shells: [], runAs: '' };
     this.agents.set(agentId, conn);
-    this.db.prepare('UPDATE agents SET last_seen = ?, last_ip = ? WHERE id = ?').run(Date.now(), ip, agentId);
+    this.db.prepare('UPDATE agents SET last_seen = ?, last_ip = ?, offline_reason = NULL WHERE id = ?').run(Date.now(), ip, agentId);
     audit(this.db, `agent:${agentId}`, 'agent.connect', agentId, null, ip);
 
     socket.on('pong', () => (conn.alive = true));
@@ -243,8 +251,9 @@ export class Hub {
       this.agents.delete(agentId);
       this.closeChannelsOf(agentId, 'agent_disconnected');
       this.rejectPendingFor(agentId, new HttpError(502, 'agent_disconnected', 'Komputer rozłączył się w trakcie operacji.'));
-      this.db.prepare('UPDATE agents SET last_seen = ? WHERE id = ?').run(Date.now(), agentId);
-      audit(this.db, `agent:${agentId}`, 'agent.disconnect', agentId, null, ip);
+      const reason = conn.bye ?? 'lost';
+      this.db.prepare('UPDATE agents SET last_seen = ?, offline_reason = ? WHERE id = ?').run(Date.now(), reason, agentId);
+      audit(this.db, `agent:${agentId}`, 'agent.disconnect', agentId, { reason }, ip);
       this.broadcastAgent(agentId, { type: 'agent_offline', id: agentId });
     });
 
@@ -271,6 +280,12 @@ export class Hub {
       case 'inventory': {
         this.storeInventory(agentId, (msg.data ?? {}) as Record<string, any>);
         this.broadcastAgent(agentId, { type: 'agent_updated', id: agentId, data: this.summary(agentId) });
+        break;
+      }
+      case 'bye': {
+        // agent kończy pracę planowo (wyłączenie komputera, zatrzymanie usługi, aktualizacja)
+        const reason = str((msg.data as { reason?: unknown } | undefined)?.reason);
+        if (PLANNED_OFFLINE.has(reason)) conn.bye = reason;
         break;
       }
       case 'audit': {
@@ -577,6 +592,7 @@ export class Hub {
       notes: r.notes,
       security: r.security_json ? JSON.parse(r.security_json) : null,
       kind: r.kind === 'kiosk' ? 'kiosk' : 'computer',
+      offlineReason: conn ? null : (r.offline_reason ?? null),
       phoneApp: !!r.phone_app,
       endButton: !!r.end_button,
     };

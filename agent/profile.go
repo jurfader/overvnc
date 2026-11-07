@@ -19,6 +19,34 @@ type KioskProfile struct {
 	EndButton bool `json:"endButton"`
 	// Browser — przeglądarka dozwolona w trybie kiosku, w której otwiera się aplikacja (ustalana przy konfiguracji)
 	Browser string `json:"browser,omitempty"`
+	// Applied* — co faktycznie jest zapisane w systemie (tryb kiosku, kafelki). Różnica z PhoneApp/EndButton =
+	// konfiguracja do zrobienia; przy włączonym UWF agent robi ją zadaniem z restartami i dopiero wtedy oznacza.
+	AppliedPhone bool `json:"appliedPhone"`
+	AppliedEnd   bool `json:"appliedEnd"`
+}
+
+// needsSetup — tryb kiosku nie odpowiada jeszcze profilowi.
+func (p KioskProfile) needsSetup() bool {
+	return p.PhoneApp != p.AppliedPhone || p.EndButton != p.AppliedEnd || (p.PhoneApp && p.Browser == "")
+}
+
+// applyKioskSetupNow — zapis trybu kiosku zgodnie z bieżącym profilem (ochrona przed zapisem wyłączona
+// albo jej brak); po sukcesie profil oznaczony jako zastosowany.
+func applyKioskSetupNow(ctx context.Context) (string, error) {
+	p := currentProfile()
+	browser, note, err := setupKioskApps(ctx, p.PhoneApp, p.EndButton)
+	if err != nil {
+		return "", err
+	}
+	p = currentProfile() // mógł przyjść nowszy profil
+	if browser != "" {
+		p.Browser = browser
+	}
+	p.AppliedPhone, p.AppliedEnd = p.PhoneApp, p.EndButton
+	if err := storeProfile(p); err != nil {
+		return "", err
+	}
+	return note, nil
 }
 
 var profileState struct {
@@ -57,22 +85,18 @@ func handleProfile(ctx context.Context, data json.RawMessage) (any, error) {
 		return nil, protoErr("bad_request", "nieprawidłowy profil")
 	}
 	prev := currentProfile()
-	next := KioskProfile{Kiosk: req.Kiosk, PhoneApp: req.Kiosk && req.PhoneApp, EndButton: req.Kiosk && req.EndButton, Browser: prev.Browser}
-	note := ""
-	// konfiguracja systemu tylko przy zmianie (agent dostaje profil po każdym połączeniu)
-	if next.PhoneApp != prev.PhoneApp || next.EndButton != prev.EndButton || (next.PhoneApp && prev.Browser == "") {
-		browser, msg, err := setupKioskApps(ctx, next.PhoneApp, next.EndButton)
-		if err != nil {
-			return nil, protoErr("kiosk_setup", "konfiguracja trybu kiosku: %v", err)
-		}
-		if browser != "" {
-			next.Browser = browser
-		}
-		note = msg
-	}
+	next := prev
+	next.Kiosk, next.PhoneApp, next.EndButton = req.Kiosk, req.Kiosk && req.PhoneApp, req.Kiosk && req.EndButton
 	if next != prev {
 		if err := storeProfile(next); err != nil {
 			return nil, err
+		}
+	}
+	note := ""
+	// konfiguracja systemu, dopóki nie jest zapisana na stałe (agent dostaje profil po każdym połączeniu)
+	if next.needsSetup() {
+		if note, err = applyKioskSetup(ctx); err != nil {
+			return nil, protoErr("kiosk_setup", "konfiguracja trybu kiosku: %v", err)
 		}
 	}
 	return map[string]any{"ok": true, "note": note}, nil

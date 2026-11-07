@@ -272,7 +272,7 @@ export function Machines({ agents, initialClient, kind = 'computer' }: { agents:
                     </td>
                     <td className="s-end">
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'inherit' }}>
-                        <Status online={a.online} />
+                        <Status online={a.online} reason={a.offlineReason} />
                         <SecurityShield security={a.security} />
                         {warn.length > 0 && (
                           <span className="only-desktop">

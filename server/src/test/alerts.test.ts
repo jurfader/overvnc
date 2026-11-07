@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { setup } from './helpers.ts';
+import { FakeAgent, setup, until } from './helpers.ts';
 import type { PushMessage } from '../notify.ts';
 
 const TOKEN = 'a'.repeat(30);
@@ -13,12 +13,14 @@ async function env() {
   const B = await s.createClient(c, 'Firma B');
   const pcA = await s.enroll(c, 'pc-a');
   const pcB = await s.enroll(c, 'pc-b');
+  const secretA = pcA.agentSecret;
+  const secretB = pcB.agentSecret;
   await s.app.inject({ method: 'PATCH', url: `/api/agents/${pcA.agentId}`, cookies: c, payload: { clientId: A.clientId } });
   await s.app.inject({ method: 'PATCH', url: `/api/agents/${pcB.agentId}`, cookies: c, payload: { clientId: B.clientId } });
   const sent: PushMessage[] = [];
   s.ctx.notifier.transport = async (_cfg, msg) => void sent.push(msg);
   const open = async (cookies = c) => (await s.app.inject({ url: '/api/alerts?state=open', cookies })).json() as any[];
-  return { s, c, A, B, a: pcA.agentId, b: pcB.agentId, sent, open };
+  return { s, c, A, B, a: pcA.agentId, b: pcB.agentId, secretA, secretB, sent, open };
 }
 
 const rule = (s: any, kind: string) => (s.db.prepare('SELECT id FROM alert_rules WHERE kind = ?').get(kind) as { id: number }).id;
@@ -79,6 +81,49 @@ test('alerty: offline po czasie z reguły, z karencją po starcie serwera; poł�
   assert.ok(!(await e.open()).some((x) => x.agentId === e.b));
   E.onConnected(e.a);
   assert.equal((await e.open()).length, 0);
+});
+
+test('alerty: komputer wyłączony normalnie (agent się pożegnał) nie zgłasza „offline”, zerwane połączenie — tak', async (t) => {
+  const e = await env();
+  t.after(e.s.close);
+  const port = await e.s.listen();
+  // agenci z prawdziwym połączeniem: a żegna się („shutdown”), b po prostu znika
+  const start = Date.now();
+  // symulacja zakończonych połączeń: powody zapisuje hub przy rozłączeniu
+  const fa = new FakeAgent(port, e.a, e.secretA);
+  const fb = new FakeAgent(port, e.b, e.secretB);
+  await fa.open();
+  await fb.open();
+  fa.hello([]);
+  fb.hello([]);
+  await until(() => e.s.ctx.hub.isOnline(e.a) && e.s.ctx.hub.isOnline(e.b));
+  fa.send({ type: 'bye', data: { reason: 'shutdown' } });
+  await new Promise((r) => setTimeout(r, 50));
+  fa.close();
+  fb.close();
+  await until(() => !e.s.ctx.hub.isOnline(e.a) && !e.s.ctx.hub.isOnline(e.b));
+  assert.equal(e.s.ctx.hub.summary(e.a)?.offlineReason, 'shutdown');
+  assert.equal(e.s.ctx.hub.summary(e.b)?.offlineReason, 'lost');
+
+  e.s.ctx.alerts.tick(start + 60 * 60_000);
+  const open = await e.open();
+  assert.deepEqual(
+    open.map((x) => x.agentId),
+    [e.b],
+    'alert tylko dla zerwanego połączenia',
+  );
+
+  // reguła „także wyłączone” (próg 1) zgłasza oba
+  const rid = rule(e.s, 'offline');
+  const r = await e.s.app.inject({
+    method: 'PUT',
+    url: `/api/alert-rules/${rid}`,
+    cookies: e.c,
+    payload: { name: 'Komputer offline', kind: 'offline', threshold: 1, durationMin: 10 },
+  });
+  assert.equal(r.statusCode, 200);
+  e.s.ctx.alerts.tick(start + 61 * 60_000);
+  assert.equal((await e.open()).length, 2);
 });
 
 test('powiadomienia: Pushover zaszyfrowany, grupowanie wielu alertów w jedną wiadomość', async (t) => {

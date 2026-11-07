@@ -31,15 +31,28 @@ export function Badge({ variant = 'neutral', children }: { variant?: 'success' |
   return <span className={`badge badge-${variant}`}>{children}</span>;
 }
 
-export function Status({ online }: { online: boolean }) {
-  return online ? (
-    <Badge variant="success">
-      <span className="dot dot-live" /> Online
-    </Badge>
-  ) : (
-    <Badge>
-      <span className="dot" /> Offline
-    </Badge>
+/** Powód braku połączenia: agent się pożegnał (wyłączenie, zatrzymanie, aktualizacja) albo połączenie zerwane. */
+const OFFLINE_LABEL: Record<string, [string, string]> = {
+  shutdown: ['Wyłączony', 'Komputer został normalnie wyłączony lub uruchamia się ponownie'],
+  stopped: ['Agent zatrzymany', 'Usługa OVERVNC została zatrzymana na komputerze'],
+  update: ['Aktualizacja', 'Agent instaluje aktualizację — zaraz wróci'],
+  lost: ['Brak połączenia', 'Połączenie zerwane bez wyłączenia: sieć, zawieszenie albo odcięty prąd'],
+};
+
+export function Status({ online, reason }: { online: boolean; reason?: string | null }) {
+  if (online)
+    return (
+      <Badge variant="success">
+        <span className="dot dot-live" /> Online
+      </Badge>
+    );
+  const [label, title] = (reason && OFFLINE_LABEL[reason]) || ['Offline', 'Brak połączenia z komputerem'];
+  return (
+    <span title={title} style={{ display: 'inline-flex' }}>
+      <Badge variant={reason === 'lost' ? 'warning' : 'neutral'}>
+        <span className="dot" /> {label}
+      </Badge>
+    </span>
   );
 }
 

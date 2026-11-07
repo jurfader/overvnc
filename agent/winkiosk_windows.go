@@ -238,6 +238,10 @@ func resumeKioskTask(ctx context.Context) {
 		case <-time.After(10 * time.Second):
 		}
 	}
+	if t.Kind == "profile" {
+		resumeProfileTask(ctx, t, st)
+		return
+	}
 	switch t.Step {
 	case "rearm", "rearming":
 		if st.UWF != nil && st.UWF.Enabled {

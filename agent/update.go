@@ -38,7 +38,10 @@ const (
 var updatesEnabled = false
 
 // exitForRestart — po podmianie binarki kończymy proces; menedżer usług uruchomi nową wersję. Podmienialne w testach.
-var exitForRestart = func() { os.Exit(3) }
+var exitForRestart = func() {
+	sayGoodbye("update")
+	os.Exit(3)
+}
 
 type Manifest struct {
 	Version string                  `json:"version"`

@@ -47,9 +47,14 @@ export function WindowsCard({ agent, win }: { agent: Agent; win: WinStatus }) {
         <div className="callout callout-brand" style={{ marginBottom: 14 }}>
           <RefreshCw />
           <div>
-            <strong>Trwa: {win.task.kind === 'extend' ? 'przedłużanie okresu próbnego' : win.task.kind}</strong>
+            <strong>Trwa: {win.task.kind === 'extend' ? 'przedłużanie okresu próbnego' : win.task.kind === 'profile' ? 'zapisywanie funkcji kiosku' : win.task.kind}</strong>
             <div className="small muted">
-              {win.task.step === 'rearm' ? 'krok 1 z 2 — wyłączanie ochrony przed zapisem i restart' : win.task.step === 'verify' ? 'ostatni restart i sprawdzenie' : 'przedłużanie'} · od {ago(win.task.started)}
+              {win.task.step === 'rearm' || win.task.step === 'apply'
+                ? 'krok 1 z 2 — wyłączanie ochrony przed zapisem i restart'
+                : win.task.step === 'verify' || win.task.step === 'done'
+                  ? 'ostatni restart'
+                  : 'przedłużanie'}{' '}
+              · od {ago(win.task.started)}
             </div>
           </div>
         </div>

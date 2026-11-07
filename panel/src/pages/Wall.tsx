@@ -135,7 +135,7 @@ function WallTile({ agent, intervalMs }: { agent: Agent; intervalMs: number }) {
               <AlertTriangle /> {alerts.length}
             </span>
           )}
-          <Status online={agent.online} />
+          <Status online={agent.online} reason={agent.offlineReason} />
         </div>
       </div>
     </a>

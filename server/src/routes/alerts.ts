@@ -96,7 +96,7 @@ export async function alertRoutes(app: FastifyInstance, ctx: Ctx) {
     assertClient(b.clientId);
     const res = db
       .prepare('INSERT INTO alert_rules (name, kind, threshold, duration_min, client_id, enabled, notify, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(b.name, b.kind, b.kind === 'offline' ? 0 : b.threshold, b.durationMin, b.clientId, b.enabled ? 1 : 0, b.notify ? 1 : 0, Date.now());
+      .run(b.name, b.kind, b.kind === 'offline' ? (b.threshold >= 1 ? 1 : 0) : b.threshold, b.durationMin, b.clientId, b.enabled ? 1 : 0, b.notify ? 1 : 0, Date.now());
     const id = Number(res.lastInsertRowid);
     alerts.ruleChanged(id);
     audit(db, actorOf(req), 'alert_rule.create', b.name, b, req.ip);
@@ -112,7 +112,7 @@ export async function alertRoutes(app: FastifyInstance, ctx: Ctx) {
     db.prepare('UPDATE alert_rules SET name = ?, kind = ?, threshold = ?, duration_min = ?, client_id = ?, enabled = ?, notify = ? WHERE id = ?').run(
       b.name,
       b.kind,
-      b.kind === 'offline' ? 0 : b.threshold,
+      b.kind === 'offline' ? (b.threshold >= 1 ? 1 : 0) : b.threshold,
       b.durationMin,
       b.clientId,
       b.enabled ? 1 : 0,

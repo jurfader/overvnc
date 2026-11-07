@@ -114,7 +114,7 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
             <ArrowLeft /> {a.kind === 'kiosk' ? 'Kioski' : 'Komputery'}
           </a>
           <h1>
-            {name} <Status online={a.online} />
+            {name} <Status online={a.online} reason={a.offlineReason} />
             {a.security && (a.security.level === 'critical' || a.security.level === 'warning') && (
               <a href={`#/m/${id}/security`} className="sec-link" title="Zobacz zabezpieczenia">
                 <SecurityShield security={a.security} />
@@ -253,7 +253,7 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
         </section>
 
         {remote && <KioskCard agent={a} />}
-        {a.kind === 'kiosk' && a.os === 'windows' && <KioskFeaturesCard agent={a} />}
+        {a.kind === 'kiosk' && a.os === 'windows' && <KioskFeaturesCard agent={a} uwf={!!inv?.windows?.uwf?.enabled} />}
         {inv?.windows && <WindowsCard agent={a} win={inv.windows} />}
 
         <section className="glass-card card anim-rise" style={{ animationDelay: '140ms' }}>

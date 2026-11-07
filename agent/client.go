@@ -109,6 +109,14 @@ func session(parent context.Context, cfg *Config, cfgPath string) error {
 	}
 	// zerwanie połączenia kończy wszystkie powłoki — nie zostawiamy osieroconych procesów root/SYSTEM
 	defer sess.channels.closeAll()
+	setGoodbye(func(reason string) {
+		bctx, bcancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer bcancel()
+		raw, _ := json.Marshal(map[string]string{"reason": reason})
+		_ = wsjson.Write(bctx, conn, Envelope{Type: "bye", Data: raw})
+		_ = conn.Close(websocket.StatusNormalClosure, reason)
+	})
+	defer setGoodbye(nil)
 	ctx = withSession(ctx, sess)
 
 	errc := make(chan error, 4)

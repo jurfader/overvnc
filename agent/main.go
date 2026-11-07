@@ -58,7 +58,15 @@ func (p *program) Start(s service.Service) error {
 	return nil
 }
 
+// Shutdown — system się wyłącza albo restartuje (Windows: osobny sygnał od menedżera usług).
+// Serwer dostaje „do widzenia” i nie zgłasza alertu „komputer offline”.
+func (p *program) Shutdown(s service.Service) error {
+	sayGoodbye("shutdown")
+	return p.Stop(s)
+}
+
 func (p *program) Stop(s service.Service) error {
+	sayGoodbye("stopped") // bez efektu, gdy już pożegnano (np. Shutdown)
 	if p.cancel != nil {
 		p.cancel()
 		<-p.done

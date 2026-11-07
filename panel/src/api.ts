@@ -107,6 +107,8 @@ export interface Agent {
   security: SecuritySummary | null;
   /** profil: zwykły komputer albo kiosk (funkcje kiosku tylko na kioskach) */
   kind: AgentKind;
+  /** offline: shutdown (wyłączony) / stopped / update / lost (zerwane połączenie) */
+  offlineReason: string | null;
   /** kiosk: aplikacja „Zdjęcia z telefonu” */
   phoneApp: boolean;
   /** kiosk: przycisk „Zakończ i usuń moje dane” */
