@@ -31,6 +31,7 @@ func runAgent(ctx context.Context, cfgPath string, cfg *Config) {
 	go resumeKioskTask(ctx) // np. przedłużanie okresu próbnego przerwane restartem
 	go runUpdatesChecker(ctx)
 	go runPhoneWatcher(ctx) // kiosk: „Zdjęcia z telefonu” po podłączeniu telefonu
+	go runKioskSession(ctx) // kiosk: „Zakończ i usuń moje dane”
 	backoff := time.Second
 	for {
 		started := time.Now()
@@ -213,6 +214,8 @@ func session(parent context.Context, cfg *Config, cfgPath string) error {
 				err = sendSecurity(ctx, send)
 			case <-securityNow:
 				err = sendSecurity(ctx, send)
+			case ev := <-agentEvents:
+				err = send("audit", ev)
 			}
 			if err != nil {
 				fail(err)

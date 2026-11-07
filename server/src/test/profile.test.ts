@@ -24,19 +24,28 @@ test('kiosk: token „Dodaj kiosk” rejestruje kiosk, profil trafia do agenta p
   await agent.open();
   agent.hello(['agent.profile']);
   await until(() => got.length === 1);
-  assert.deepEqual(got[0], { kiosk: true, phoneApp: false });
+  assert.deepEqual(got[0], { kiosk: true, phoneApp: false, endButton: false });
 
   const res = (await s.app.inject({ method: 'PATCH', url: `/api/agents/${agentId}`, cookies: c, payload: { phoneApp: true } })).json();
   assert.equal(res.phoneApp, true);
   assert.equal(res.profileNote, 'Tryb kiosku zaktualizowany');
-  assert.deepEqual(got[1], { kiosk: true, phoneApp: true });
+  assert.deepEqual(got[1], { kiosk: true, phoneApp: true, endButton: false });
+
+  // przycisk „Zakończ i usuń moje dane”
+  await s.app.inject({ method: 'PATCH', url: `/api/agents/${agentId}`, cookies: c, payload: { endButton: true } });
+  assert.deepEqual(got[2], { kiosk: true, phoneApp: true, endButton: true });
+  // klient zakończył sesję — wpis w dzienniku; nieznane zdarzenia agenta są pomijane
+  agent.send({ type: 'audit', data: { action: 'kiosk.session_end', details: { uwf: true } } });
+  agent.send({ type: 'audit', data: { action: 'user.create', details: {} } });
+  await until(() => !!s.db.prepare("SELECT 1 FROM audit_log WHERE action = 'kiosk.session_end'").get());
+  assert.equal(s.db.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE actor LIKE 'agent:%' AND action = 'user.create'").get()!.n, 0);
 
   // zwykły komputer: funkcje kiosku wyłączone niezależnie od przełącznika
   await s.app.inject({ method: 'PATCH', url: `/api/agents/${agentId}`, cookies: c, payload: { kind: 'computer' } });
-  assert.deepEqual(got[2], { kiosk: false, phoneApp: false });
+  assert.deepEqual(got[3], { kiosk: false, phoneApp: false, endButton: false });
   // ta sama wartość — bez ponownego wysyłania
   await s.app.inject({ method: 'PATCH', url: `/api/agents/${agentId}`, cookies: c, payload: { kind: 'computer', label: 'X' } });
-  assert.equal(got.length, 3);
+  assert.equal(got.length, 4);
   agent.close();
 });
 

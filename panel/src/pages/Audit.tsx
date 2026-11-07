@@ -71,6 +71,7 @@ const ACTIONS: Record<string, [string, Tone]> = {
   'desktop.close': ['Zamknięcie pulpitu zdalnego', 'neutral'],
   'desktop.sas': ['Ctrl+Alt+Del na pulpicie zdalnym', 'warning'],
   'desktop.take': ['Przejęcie sterowania pulpitem', 'neutral'],
+  'kiosk.session_end': ['Klient zakończył sesję (dane usunięte)', 'info'],
 };
 
 export function Audit() {

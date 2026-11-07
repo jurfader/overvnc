@@ -7,6 +7,9 @@ import type { MetricsStore } from './metrics.ts';
 import { canSeeClient, scopeSql } from './scope.ts';
 import { assessSecurity, diffInventory, diffSecurity, type Change, type SecuritySummary } from './security.ts';
 
+/** Zdarzenia, które agent może dopisać do dziennika. */
+const AGENT_AUDIT_ACTIONS = new Set(['kiosk.session_end']);
+
 /** Najwięcej wpisów historii zmian na komputer (najstarsze usuwamy). */
 const MAX_CHANGES = 2000;
 
@@ -100,6 +103,8 @@ export interface AgentSummary {
   kind: 'computer' | 'kiosk';
   /** kiosk: aplikacja „Zdjęcia z telefonu” */
   phoneApp: boolean;
+  /** kiosk: przycisk „Zakończ i usuń moje dane” */
+  endButton: boolean;
 }
 
 export interface TagRef {
@@ -145,6 +150,7 @@ export interface AgentRow {
   security_json: string | null;
   kind: string;
   phone_app: number;
+  end_button: number;
 }
 
 type SummaryRow = AgentRow & { client_name: string | null; client_color: string | null; site_name: string | null };
@@ -265,6 +271,12 @@ export class Hub {
       case 'inventory': {
         this.storeInventory(agentId, (msg.data ?? {}) as Record<string, any>);
         this.broadcastAgent(agentId, { type: 'agent_updated', id: agentId, data: this.summary(agentId) });
+        break;
+      }
+      case 'audit': {
+        // zdarzenia agenta do dziennika — tylko znane rodzaje
+        const d = (msg.data ?? {}) as { action?: string; details?: unknown };
+        if (d.action && AGENT_AUDIT_ACTIONS.has(d.action)) audit(this.db, `agent:${agentId}`, d.action, agentId, d.details ?? null);
         break;
       }
       case 'security': {
@@ -566,6 +578,7 @@ export class Hub {
       security: r.security_json ? JSON.parse(r.security_json) : null,
       kind: r.kind === 'kiosk' ? 'kiosk' : 'computer',
       phoneApp: !!r.phone_app,
+      endButton: !!r.end_button,
     };
   }
 

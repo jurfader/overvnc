@@ -9,7 +9,7 @@ import { OrganizeModal } from './organize.tsx';
 import { ChangesView, SecurityShield, SecurityView } from './protection.tsx';
 import { MonitoringView } from './remote/MonitoringView.tsx';
 import { KioskCard } from './remote/KioskCard.tsx';
-import { PhoneAppCard } from './remote/PhoneAppCard.tsx';
+import { KioskFeaturesCard } from './remote/KioskFeaturesCard.tsx';
 import { WindowsCard } from './remote/WindowsCard.tsx';
 import { ProcessesView } from './remote/ProcessesView.tsx';
 import { ServicesView } from './remote/ServicesView.tsx';
@@ -253,7 +253,7 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
         </section>
 
         {remote && <KioskCard agent={a} />}
-        {a.kind === 'kiosk' && a.os === 'windows' && <PhoneAppCard agent={a} />}
+        {a.kind === 'kiosk' && a.os === 'windows' && <KioskFeaturesCard agent={a} />}
         {inv?.windows && <WindowsCard agent={a} win={inv.windows} />}
 
         <section className="glass-card card anim-rise" style={{ animationDelay: '140ms' }}>

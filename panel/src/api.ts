@@ -109,6 +109,8 @@ export interface Agent {
   kind: AgentKind;
   /** kiosk: aplikacja „Zdjęcia z telefonu” */
   phoneApp: boolean;
+  /** kiosk: przycisk „Zakończ i usuń moje dane” */
+  endButton: boolean;
   /** tylko po stronie panelu: zmienia się, gdy serwer zgłosi nowe dane inwentarza */
   rev?: number;
 }
@@ -449,7 +451,7 @@ export const api = {
   agent: (id: string) => request<AgentDetail>('GET', `/api/agents/${id}`),
   updateAgent: (
     id: string,
-    patch: { label?: string; notes?: string; clientId?: number | null; siteId?: number | null; tagIds?: number[]; kind?: AgentKind; phoneApp?: boolean },
+    patch: { label?: string; notes?: string; clientId?: number | null; siteId?: number | null; tagIds?: number[]; kind?: AgentKind; phoneApp?: boolean; endButton?: boolean },
   ) => request<Agent & { profileNote?: string | null }>('PATCH', `/api/agents/${id}`, patch),
   bulkUpdate: (body: { ids: string[]; clientId?: number | null; siteId?: number | null; addTagIds?: number[]; removeTagIds?: number[] }) =>
     request<{ updated: number }>('POST', '/api/agents/bulk', body),

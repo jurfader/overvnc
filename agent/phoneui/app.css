@@ -82,10 +82,10 @@ main { padding: 8px 24px 120px; }
 .tile .noimg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 8px; color: var(--muted); font-size: 13px; word-break: break-all; }
 
 .bar {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap;
   padding: 14px 24px; background: rgba(21, 21, 31, 0.97); border-top: 1px solid var(--border); box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.4);
 }
-.bar-info { margin-right: auto; font-size: 18px; }
+.bar-info { margin-right: 8px; font-size: 18px; }
 
 .overlay { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; background: rgba(5, 5, 10, 0.88); }
 #preview img { max-width: calc(100vw - 180px); max-height: calc(100vh - 140px); border-radius: 10px; }

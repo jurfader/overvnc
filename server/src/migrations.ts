@@ -325,4 +325,9 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE agents ADD COLUMN phone_app INTEGER NOT NULL DEFAULT 0;       -- kiosk: „Zdjęcia z telefonu”
   ALTER TABLE enroll_tokens ADD COLUMN kind TEXT NOT NULL DEFAULT 'computer';
   `,
+
+  // 13 — kiosk: przycisk „Zakończ i usuń moje dane” (v0.20.0)
+  `
+  ALTER TABLE agents ADD COLUMN end_button INTEGER NOT NULL DEFAULT 0;
+  `,
 ];

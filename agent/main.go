@@ -108,6 +108,14 @@ func main() {
 	case "version":
 		fmt.Println(version)
 
+	case "session-button":
+		// kiosk: przycisk „Zakończ i usuń moje dane” w sesji klienta (uruchamia go usługa)
+		os.Exit(runEndButton())
+
+	case "session-end":
+		// kiosk: to samo z kafelka w menu Start
+		os.Exit(runSessionEnd())
+
 	case "phone":
 		// „Zdjęcia z telefonu” — aplikacja klienta kiosku (uruchamia ją klient z menu Start albo agent po podłączeniu telefonu)
 		os.Exit(runPhoneApp(fs.Args()))

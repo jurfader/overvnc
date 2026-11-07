@@ -15,6 +15,8 @@ import (
 type KioskProfile struct {
 	Kiosk    bool `json:"kiosk"`
 	PhoneApp bool `json:"phoneApp"` // „Zdjęcia z telefonu”: kafelek w Start + otwieranie po podłączeniu telefonu
+	// EndButton — „Zakończ i usuń moje dane”: przycisk na ekranie + kafelek w Start (czyszczenie = restart z UWF)
+	EndButton bool `json:"endButton"`
 	// Browser — przeglądarka dozwolona w trybie kiosku, w której otwiera się aplikacja (ustalana przy konfiguracji)
 	Browser string `json:"browser,omitempty"`
 }
@@ -47,20 +49,21 @@ func storeProfile(p KioskProfile) error {
 
 func handleProfile(ctx context.Context, data json.RawMessage) (any, error) {
 	req, err := decode[struct {
-		Kiosk    bool `json:"kiosk"`
-		PhoneApp bool `json:"phoneApp"`
+		Kiosk     bool `json:"kiosk"`
+		PhoneApp  bool `json:"phoneApp"`
+		EndButton bool `json:"endButton"`
 	}](data)
 	if err != nil {
 		return nil, protoErr("bad_request", "nieprawidłowy profil")
 	}
 	prev := currentProfile()
-	next := KioskProfile{Kiosk: req.Kiosk, PhoneApp: req.Kiosk && req.PhoneApp, Browser: prev.Browser}
+	next := KioskProfile{Kiosk: req.Kiosk, PhoneApp: req.Kiosk && req.PhoneApp, EndButton: req.Kiosk && req.EndButton, Browser: prev.Browser}
 	note := ""
 	// konfiguracja systemu tylko przy zmianie (agent dostaje profil po każdym połączeniu)
-	if next.PhoneApp != prev.PhoneApp || (next.PhoneApp && prev.Browser == "") {
-		browser, msg, err := setupPhoneApp(ctx, next.PhoneApp)
+	if next.PhoneApp != prev.PhoneApp || next.EndButton != prev.EndButton || (next.PhoneApp && prev.Browser == "") {
+		browser, msg, err := setupKioskApps(ctx, next.PhoneApp, next.EndButton)
 		if err != nil {
-			return nil, protoErr("kiosk_setup", "konfiguracja aplikacji „Zdjęcia z telefonu”: %v", err)
+			return nil, protoErr("kiosk_setup", "konfiguracja trybu kiosku: %v", err)
 		}
 		if browser != "" {
 			next.Browser = browser

@@ -9,9 +9,17 @@ export type AgentKind = 'computer' | 'kiosk';
  * Zwraca uwagę agenta (np. „zmiana zadziała po ponownym zalogowaniu klienta”) albo null.
  */
 export async function pushProfile(db: Db, hub: Hub, agentId: string): Promise<string | null> {
-  const row = db.prepare('SELECT kind, phone_app FROM agents WHERE id = ?').get(agentId) as { kind: AgentKind; phone_app: number } | undefined;
+  const row = db.prepare('SELECT kind, phone_app, end_button FROM agents WHERE id = ?').get(agentId) as
+    | { kind: AgentKind; phone_app: number; end_button: number }
+    | undefined;
   if (!row || !hub.isOnline(agentId) || !hub.summary(agentId)?.capabilities.includes('agent.profile')) return null;
-  const r = await hub.request<{ note?: string }>(agentId, 'agent.profile', { kiosk: row.kind === 'kiosk', phoneApp: row.kind === 'kiosk' && !!row.phone_app }, { timeoutMs: 150_000 });
+  const kiosk = row.kind === 'kiosk';
+  const r = await hub.request<{ note?: string }>(
+    agentId,
+    'agent.profile',
+    { kiosk, phoneApp: kiosk && !!row.phone_app, endButton: kiosk && !!row.end_button },
+    { timeoutMs: 150_000 },
+  );
   return r?.note || null;
 }
 

@@ -141,11 +141,17 @@ func startAsConsoleUser(args ...string) (windows.Handle, error) {
 	return pi.Process, nil
 }
 
-// Konfiguracja trybu kiosku dla aplikacji (jako SYSTEM, jak skrypt kiosku: most WMI-MDM Assigned Access).
+// Konfiguracja trybu kiosku dla funkcji OVERVNC (jako SYSTEM, jak skrypt kiosku: most WMI-MDM Assigned Access):
+// agent w AllowedApps, gdy włączona jest którakolwiek funkcja; kafelki „Zdjęcia z telefonu” i „Zakończ i usuń
+// moje dane” w Start; adres lokalny dopuszczony w przeglądarce z listą blokad (aplikacja zdjęć).
 // Zwraca JSON: state = updated | unchanged | nokiosk, browser = przeglądarka dozwolona w kiosku.
-const phoneSetupScript = `$ErrorActionPreference = 'Stop'
-$exe = $env:OVERVNC_EXE; $enable = $env:OVERVNC_ENABLE -eq '1'
-$lnk = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Zdjęcia z telefonu.lnk'
+const kioskSetupScript = `$ErrorActionPreference = 'Stop'
+$exe = $env:OVERVNC_EXE; $phone = $env:OVERVNC_PHONE -eq '1'; $endBtn = $env:OVERVNC_ENDBTN -eq '1'; $any = $phone -or $endBtn
+$progs = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs'
+$tiles = @(
+  @{ on = $phone; lnk = (Join-Path $progs 'Zdjęcia z telefonu.lnk'); args = 'phone'; desc = 'Zdjęcia z telefonu — kopiowanie i usuwanie zdjęć z telefonu' },
+  @{ on = $endBtn; lnk = (Join-Path $progs 'Zakończ i usuń moje dane.lnk'); args = 'session-end'; desc = 'Usuwa Twoje pliki i logowania — komputer uruchomi się ponownie' }
+)
 $aaNs = 'http://schemas.microsoft.com/AssignedAccess/2017/config'
 $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
 $chrome = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe", "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
@@ -165,14 +171,15 @@ if ($cfg) {
   $changed = $false
   foreach ($list in $xml.SelectNodes('//a:AllowedApps', $ns)) {
     $mine = @($list.SelectNodes('a:App', $ns) | Where-Object { $_.DesktopAppPath -ieq $exe })
-    if ($enable -and -not $mine) { $e = $xml.CreateElement('App', $aaNs); $e.SetAttribute('DesktopAppPath', $exe); [void]$list.AppendChild($e); $changed = $true }
-    if (-not $enable -and $mine) { $mine | ForEach-Object { [void]$list.RemoveChild($_) }; $changed = $true }
+    if ($any -and -not $mine) { $e = $xml.CreateElement('App', $aaNs); $e.SetAttribute('DesktopAppPath', $exe); [void]$list.AppendChild($e); $changed = $true }
+    if (-not $any -and $mine) { $mine | ForEach-Object { [void]$list.RemoveChild($_) }; $changed = $true }
   }
   foreach ($pins in $xml.SelectNodes('//v5:StartPins', $ns)) {
     $j = $pins.InnerText | ConvertFrom-Json
-    $list = @($j.pinnedList | Where-Object { $_.desktopAppLink -ine $lnk })
-    if ($enable) { $list += [pscustomobject]@{ desktopAppLink = $lnk } }
-    if ($list.Count -ne @($j.pinnedList).Count -or $enable -ne [bool]($j.pinnedList | Where-Object { $_.desktopAppLink -ieq $lnk })) {
+    $before = (@($j.pinnedList) | ForEach-Object { $_.desktopAppLink }) -join '|'
+    $list = @($j.pinnedList | Where-Object { $l = $_.desktopAppLink; -not ($tiles | Where-Object { $_.lnk -ieq $l }) })
+    foreach ($t in $tiles) { if ($t.on) { $list += [pscustomobject]@{ desktopAppLink = $t.lnk } } }
+    if ((($list | ForEach-Object { $_.desktopAppLink }) -join '|') -ne $before) {
       $j.pinnedList = $list
       $pins.RemoveAll(); [void]$pins.AppendChild($xml.CreateCDataSection(($j | ConvertTo-Json -Depth 6 -Compress)))
       $changed = $true
@@ -180,9 +187,15 @@ if ($cfg) {
   }
   if ($changed) { $o.Configuration = [System.Net.WebUtility]::HtmlEncode($xml.OuterXml); Set-CimInstance -CimInstance $o; $state = 'updated' } else { $state = 'unchanged' }
 }
-if ($enable) {
-  $sh = New-Object -ComObject WScript.Shell; $s = $sh.CreateShortcut($lnk)
-  $s.TargetPath = $exe; $s.Arguments = "phone browser=""$browser"""; $s.IconLocation = "$browser,0"; $s.Description = 'Zdjęcia z telefonu — kopiowanie i usuwanie zdjęć z telefonu'; $s.Save()
+foreach ($t in $tiles) {
+  if ($t.on) {
+    $sh = New-Object -ComObject WScript.Shell; $s = $sh.CreateShortcut($t.lnk)
+    $s.TargetPath = $exe; $s.Arguments = $t.args; $s.Description = $t.desc
+    if ($t.args -eq 'phone') { $s.Arguments = "phone browser=""$browser"""; $s.IconLocation = "$browser,0" } else { $s.IconLocation = "$env:windir\System32\shell32.dll,27" }
+    $s.Save()
+  } elseif (Test-Path $t.lnk) { Remove-Item $t.lnk -Force }
+}
+if ($phone) {
   # przeglądarka z listą zablokowanych adresów: dopuść aplikację (adres lokalny tego komputera)
   foreach ($pol in 'HKLM:\SOFTWARE\Policies\Google\Chrome', 'HKLM:\SOFTWARE\Policies\Microsoft\Edge') {
     if (Test-Path "$pol\URLBlocklist") {
@@ -194,22 +207,24 @@ if ($enable) {
       }
     }
   }
-} elseif (Test-Path $lnk) { Remove-Item $lnk -Force }
+}
 [pscustomobject]@{ state = $state; browser = [string]$browser } | ConvertTo-Json -Compress`
 
-func setupPhoneApp(ctx context.Context, enable bool) (browser, note string, err error) {
+func setupKioskApps(ctx context.Context, phone, endButton bool) (browser, note string, err error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", "", err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	cmd := runPowerShellCmd(ctx, phoneSetupScript)
-	en := "0"
-	if enable {
-		en = "1"
+	cmd := runPowerShellCmd(ctx, kioskSetupScript)
+	flag := func(b bool) string {
+		if b {
+			return "1"
+		}
+		return "0"
 	}
-	cmd.Env = append(os.Environ(), "OVERVNC_EXE="+exe, "OVERVNC_ENABLE="+en)
+	cmd.Env = append(os.Environ(), "OVERVNC_EXE="+exe, "OVERVNC_PHONE="+flag(phone), "OVERVNC_ENDBTN="+flag(endButton))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", "", fmt.Errorf("%s", strings.TrimSpace(firstNonEmpty(string(out), err.Error())))
@@ -225,10 +240,10 @@ func setupPhoneApp(ctx context.Context, enable bool) (browser, note string, err 
 	case "updated":
 		note = "Tryb kiosku zaktualizowany — zmiana zadziała po ponownym zalogowaniu klienta (np. restart kiosku)."
 	case "nokiosk":
-		note = "Na tym komputerze nie ma trybu kiosku (Assigned Access) — aplikacja jest w menu Start."
+		note = "Na tym komputerze nie ma trybu kiosku (Assigned Access) — kafelki są w menu Start."
 	}
 	if st := collectWinStatus(ctx); st != nil && st.UWF != nil && st.UWF.Enabled {
-		note += " Uwaga: ochrona przed zapisem (UWF) jest włączona — zmiana zniknie po restarcie. Wyłącz UWF, włącz aplikację ponownie, potem włącz UWF."
+		note += " Uwaga: ochrona przed zapisem (UWF) jest włączona — zmiana zniknie po restarcie. Wyłącz UWF, zapisz ponownie, potem włącz UWF."
 	}
 	return r.Browser, strings.TrimSpace(note), nil
 }

@@ -108,12 +108,17 @@ func registerOverlayClass() {
 }
 
 func newLayerWin(screenDC uintptr, x, y, w, h int) *layerWin {
+	return newLayerWinEx(screenDC, x, y, w, h, wsExLayered|wsExTransparent|wsExTopmost|wsExToolWindow|wsExNoActivate, overlayClass)
+}
+
+// newLayerWinEx — okno warstwowe z własnymi stylami i klasą (np. klikalny przycisk kiosku).
+func newLayerWinEx(screenDC uintptr, x, y, w, h int, exStyle uintptr, class *uint16) *layerWin {
 	if w <= 0 || h <= 0 {
 		return nil
 	}
 	hwnd, _, _ := procCreateWindowExW.Call(
-		wsExLayered|wsExTransparent|wsExTopmost|wsExToolWindow|wsExNoActivate,
-		uintptr(unsafe.Pointer(overlayClass)), 0, wsPopup,
+		exStyle,
+		uintptr(unsafe.Pointer(class)), 0, wsPopup,
 		uintptr(x), uintptr(y), uintptr(w), uintptr(h), 0, 0, 0, 0)
 	if hwnd == 0 {
 		return nil

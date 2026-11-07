@@ -1026,3 +1026,16 @@ textarea.pole.editor-area { font: 12.5px/1.55 var(--font-mono); height: 58vh; mi
   .sec-head-main .btn { width: 100%; justify-content: center; }
   .sec-head-main .btn .btn-label { display: inline; }
 }
+
+/* funkcje kiosku */
+.kiosk-features { display: grid; gap: 10px; margin-bottom: 12px; }
+.kiosk-feature { display: flex; align-items: flex-start; gap: 12px; padding: 12px; border-radius: 12px; background: rgb(var(--fill) / 0.04); border: 1px solid rgb(var(--fill) / 0.08); }
+.kiosk-feature-icon { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0; color: rgb(var(--ink-2)); background: rgb(var(--fill) / 0.06); }
+.kiosk-feature-icon.on { color: rgb(var(--success)); background: rgb(var(--success) / 0.12); }
+.kiosk-feature-icon svg { width: 18px; height: 18px; }
+.kiosk-feature-body { flex: 1; min-width: 0; }
+.kiosk-feature-body strong { display: block; margin-bottom: 2px; }
+@media (max-width: 720px) {
+  .kiosk-feature { flex-wrap: wrap; }
+  .kiosk-feature .btn { width: 100%; justify-content: center; }
+}

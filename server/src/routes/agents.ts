@@ -19,6 +19,8 @@ const PatchBody = z.object({
   // profil: zwykły komputer albo kiosk; dla kiosku aplikacja „Zdjęcia z telefonu”
   kind: z.enum(['computer', 'kiosk']).optional(),
   phoneApp: z.boolean().optional(),
+  // kiosk: przycisk „Zakończ i usuń moje dane”
+  endButton: z.boolean().optional(),
 });
 const BulkBody = z.object({
   ids: z.array(z.uuid()).min(1).max(1000),
@@ -111,12 +113,13 @@ export async function agentRoutes(app: FastifyInstance, ctx: Ctx) {
   app.patch('/api/agents/:id', manage, async (req) => {
     const { id, clientId: curClient } = access(req);
     const body = parse(PatchBody, req.body);
-    const cur = db.prepare('SELECT label, notes, site_id, kind, phone_app FROM agents WHERE id = ?').get(id) as {
+    const cur = db.prepare('SELECT label, notes, site_id, kind, phone_app, end_button FROM agents WHERE id = ?').get(id) as {
       label: string;
       notes: string;
       site_id: number | null;
       kind: string;
       phone_app: number;
+      end_button: number;
     };
 
     const clientId = body.clientId !== undefined ? body.clientId : curClient;
@@ -126,13 +129,14 @@ export async function agentRoutes(app: FastifyInstance, ctx: Ctx) {
     if (body.tagIds) assertTagsExist(body.tagIds);
 
     tx(db, () => {
-      db.prepare('UPDATE agents SET label = ?, notes = ?, client_id = ?, site_id = ?, kind = ?, phone_app = ? WHERE id = ?').run(
+      db.prepare('UPDATE agents SET label = ?, notes = ?, client_id = ?, site_id = ?, kind = ?, phone_app = ?, end_button = ? WHERE id = ?').run(
         body.label ?? cur.label,
         body.notes ?? cur.notes,
         clientId,
         siteId,
         body.kind ?? cur.kind,
         body.phoneApp === undefined ? cur.phone_app : body.phoneApp ? 1 : 0,
+        body.endButton === undefined ? cur.end_button : body.endButton ? 1 : 0,
         id,
       );
       if (body.tagIds) {
@@ -145,7 +149,8 @@ export async function agentRoutes(app: FastifyInstance, ctx: Ctx) {
     pushUpdate(id);
     // zmiana profilu: od razu do agenta (gdy offline — po połączeniu); uwaga agenta wraca do panelu
     let note: string | null = null;
-    if ((body.kind !== undefined && body.kind !== cur.kind) || (body.phoneApp !== undefined && (body.phoneApp ? 1 : 0) !== cur.phone_app)) {
+    const changed = (v: boolean | undefined, was: number) => v !== undefined && (v ? 1 : 0) !== was;
+    if ((body.kind !== undefined && body.kind !== cur.kind) || changed(body.phoneApp, cur.phone_app) || changed(body.endButton, cur.end_button)) {
       try {
         note = await pushProfile(db, hub, id);
       } catch (e) {
