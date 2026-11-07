@@ -112,6 +112,9 @@ export interface AgentSummary {
   phoneApp: boolean;
   /** kiosk: przycisk „Zakończ i usuń moje dane” */
   endButton: boolean;
+  /** kiosk: udział Pobrane dla pracowników (off | read | delete) i adresy, z których wolno (puste = sieć lokalna) */
+  shareMode: string;
+  shareAllow: string;
 }
 
 export interface TagRef {
@@ -159,6 +162,8 @@ export interface AgentRow {
   phone_app: number;
   end_button: number;
   offline_reason: string | null;
+  share_mode: string;
+  share_allow: string;
 }
 
 type SummaryRow = AgentRow & { client_name: string | null; client_color: string | null; site_name: string | null };
@@ -595,6 +600,8 @@ export class Hub {
       offlineReason: conn ? null : (r.offline_reason ?? null),
       phoneApp: !!r.phone_app,
       endButton: !!r.end_button,
+      shareMode: r.share_mode ?? 'off',
+      shareAllow: r.share_allow ?? '',
     };
   }
 

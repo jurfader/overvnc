@@ -39,3 +39,20 @@ func TestProfileAppliedTracking(t *testing.T) {
 		t.Fatalf("zwykły komputer z funkcjami kiosku: %+v", p)
 	}
 }
+
+func TestValidAllowList(t *testing.T) {
+	for s, ok := range map[string]bool{
+		"":                           true,
+		"192.168.1.20":               true,
+		"192.168.1.20, 192.168.1.21": true,
+		"192.168.1.0/24":             true,
+		"fe80::1":                    true,
+		"192.168.1.300":              false,
+		"komputer-pracownika":        false,
+		"1.2.3.4; rm -rf /":          false,
+	} {
+		if validAllowList(s) != ok {
+			t.Errorf("%q: oczekiwano %v", s, ok)
+		}
+	}
+}

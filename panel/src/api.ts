@@ -113,6 +113,9 @@ export interface Agent {
   phoneApp: boolean;
   /** kiosk: przycisk „Zakończ i usuń moje dane” */
   endButton: boolean;
+  /** kiosk: udział Pobrane dla pracowników — off | read | delete; adresy (puste = sieć lokalna) */
+  shareMode: 'off' | 'read' | 'delete';
+  shareAllow: string;
   /** tylko po stronie panelu: zmienia się, gdy serwer zgłosi nowe dane inwentarza */
   rev?: number;
 }
@@ -190,7 +193,20 @@ export interface Inventory {
   security?: SecurityFacts | null;
 }
 
+/** Kiosk: udział sieciowy folderu Pobrane (stan odczytany z komputera). */
+export interface ShareStatus {
+  /** read | delete | "" (brak udziału) */
+  mode: string;
+  folder?: string;
+  user: boolean;
+  userEnabled: boolean;
+  allow?: string;
+  addresses?: string[];
+  computer: string;
+}
+
 export interface WinStatus {
+  share?: ShareStatus | null;
   license?: {
     name: string;
     description: string;
@@ -453,11 +469,12 @@ export const api = {
   agent: (id: string) => request<AgentDetail>('GET', `/api/agents/${id}`),
   updateAgent: (
     id: string,
-    patch: { label?: string; notes?: string; clientId?: number | null; siteId?: number | null; tagIds?: number[]; kind?: AgentKind; phoneApp?: boolean; endButton?: boolean },
+    patch: { label?: string; notes?: string; clientId?: number | null; siteId?: number | null; tagIds?: number[]; kind?: AgentKind; phoneApp?: boolean; endButton?: boolean; shareMode?: 'off' | 'read' | 'delete'; shareAllow?: string },
   ) => request<Agent & { profileNote?: string | null }>('PATCH', `/api/agents/${id}`, patch),
   bulkUpdate: (body: { ids: string[]; clientId?: number | null; siteId?: number | null; addTagIds?: number[]; removeTagIds?: number[] }) =>
     request<{ updated: number }>('POST', '/api/agents/bulk', body),
   refreshInventory: (id: string) => request<Ok>('POST', `/api/agents/${id}/refresh`, {}),
+  setSharePassword: (id: string, password: string) => request<{ ok: true; note: string | null }>('POST', `/api/agents/${id}/share-password`, { password }),
   deleteAgent: (id: string) => request<Ok>('DELETE', `/api/agents/${id}`),
   agentChanges: (id: string, q: { kind?: ChangeKind; before?: number } = {}) =>
     request<{ items: ChangeItem[] }>('GET', `/api/agents/${id}/changes?${qs(q)}`),

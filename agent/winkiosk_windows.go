@@ -70,6 +70,9 @@ func collectWinStatus(ctx context.Context) *WinStatus {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	st := &WinStatus{Task: loadKioskTask(), LastTask: loadKioskResult()}
+	if currentProfile().Kiosk {
+		st.Share = collectShareStatus(ctx)
+	}
 	out, err := runPowerShell(ctx, winStatusScript)
 	if err != nil {
 		return st

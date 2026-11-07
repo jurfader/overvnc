@@ -24,16 +24,33 @@ test('kiosk: token „Dodaj kiosk” rejestruje kiosk, profil trafia do agenta p
   await agent.open();
   agent.hello(['agent.profile']);
   await until(() => got.length === 1);
-  assert.deepEqual(got[0], { kiosk: true, phoneApp: false, endButton: false });
+  assert.deepEqual(got[0], { kiosk: true, phoneApp: false, endButton: false, shareMode: 'off', shareAllow: '' });
 
   const res = (await s.app.inject({ method: 'PATCH', url: `/api/agents/${agentId}`, cookies: c, payload: { phoneApp: true } })).json();
   assert.equal(res.phoneApp, true);
   assert.equal(res.profileNote, 'Tryb kiosku zaktualizowany');
-  assert.deepEqual(got[1], { kiosk: true, phoneApp: true, endButton: false });
+  assert.deepEqual(got[1], { kiosk: true, phoneApp: true, endButton: false, shareMode: 'off', shareAllow: '' });
 
   // przycisk „Zakończ i usuń moje dane”
   await s.app.inject({ method: 'PATCH', url: `/api/agents/${agentId}`, cookies: c, payload: { endButton: true } });
-  assert.deepEqual(got[2], { kiosk: true, phoneApp: true, endButton: true });
+  assert.deepEqual(got[2], { kiosk: true, phoneApp: true, endButton: true, shareMode: 'off', shareAllow: '' });
+
+  // udział Pobrane: tryb i adresy do kiosku; błędna lista adresów odrzucona
+  const bad = await s.app.inject({ method: 'PATCH', url: `/api/agents/${agentId}`, cookies: c, payload: { shareMode: 'delete', shareAllow: '1.2.3.4; rm -rf /' } });
+  assert.equal(bad.statusCode, 400);
+  await s.app.inject({ method: 'PATCH', url: `/api/agents/${agentId}`, cookies: c, payload: { shareMode: 'delete', shareAllow: '192.168.1.20, 192.168.1.0/24' } });
+  assert.deepEqual(got[3], { kiosk: true, phoneApp: true, endButton: true, shareMode: 'delete', shareAllow: '192.168.1.20, 192.168.1.0/24' });
+  // hasło: przekazane kioskowi, w dzienniku bez hasła, nigdzie nie zapisane
+  const passes: unknown[] = [];
+  agent.handlers['kiosk.sharepass'] = (d) => (passes.push(d), { ok: true, note: '' });
+  agent.hello(['agent.profile', 'kiosk.sharepass']);
+  await until(() => got.length === 5); // ponowne hello = profil jeszcze raz
+  const pw = await s.app.inject({ method: 'POST', url: `/api/agents/${agentId}/share-password`, cookies: c, payload: { password: 'Tajne-haslo-123' } });
+  assert.equal(pw.statusCode, 200, pw.body);
+  assert.deepEqual(passes, [{ password: 'Tajne-haslo-123' }]);
+  const dump = JSON.stringify(s.db.prepare('SELECT * FROM audit_log').all()) + JSON.stringify(s.db.prepare('SELECT * FROM agents').all());
+  assert.ok(!dump.includes('Tajne-haslo-123'), 'hasło nie może trafić do bazy');
+  assert.equal((await s.app.inject({ method: 'POST', url: `/api/agents/${agentId}/share-password`, cookies: c, payload: { password: 'krotkie' } })).statusCode, 400);
   // klient zakończył sesję — wpis w dzienniku; nieznane zdarzenia agenta są pomijane
   agent.send({ type: 'audit', data: { action: 'kiosk.session_end', details: { uwf: true } } });
   agent.send({ type: 'audit', data: { action: 'user.create', details: {} } });
@@ -42,10 +59,10 @@ test('kiosk: token „Dodaj kiosk” rejestruje kiosk, profil trafia do agenta p
 
   // zwykły komputer: funkcje kiosku wyłączone niezależnie od przełącznika
   await s.app.inject({ method: 'PATCH', url: `/api/agents/${agentId}`, cookies: c, payload: { kind: 'computer' } });
-  assert.deepEqual(got[3], { kiosk: false, phoneApp: false, endButton: false });
+  assert.deepEqual(got[5], { kiosk: false, phoneApp: false, endButton: false, shareMode: 'off', shareAllow: '' });
   // ta sama wartość — bez ponownego wysyłania
   await s.app.inject({ method: 'PATCH', url: `/api/agents/${agentId}`, cookies: c, payload: { kind: 'computer', label: 'X' } });
-  assert.equal(got.length, 4);
+  assert.equal(got.length, 6);
   agent.close();
 });
 

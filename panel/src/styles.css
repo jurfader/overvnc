@@ -1028,7 +1028,7 @@ textarea.pole.editor-area { font: 12.5px/1.55 var(--font-mono); height: 58vh; mi
 }
 
 /* funkcje kiosku */
-.kiosk-features { display: grid; gap: 10px; margin-bottom: 12px; }
+.kiosk-features { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin-bottom: 12px; }
 .kiosk-feature { display: flex; align-items: flex-start; gap: 12px; padding: 12px; border-radius: 12px; background: rgb(var(--fill) / 0.04); border: 1px solid rgb(var(--fill) / 0.08); }
 .kiosk-feature-icon { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0; color: rgb(var(--ink-2)); background: rgb(var(--fill) / 0.06); }
 .kiosk-feature-icon.on { color: rgb(var(--success)); background: rgb(var(--success) / 0.12); }
@@ -1038,4 +1038,22 @@ textarea.pole.editor-area { font: 12.5px/1.55 var(--font-mono); height: 58vh; mi
 @media (max-width: 720px) {
   .kiosk-feature { flex-wrap: wrap; }
   .kiosk-feature .btn { width: 100%; justify-content: center; }
+}
+
+/* udział Pobrane */
+.share-info { display: grid; gap: 6px; margin: 10px 0 4px; padding: 10px 12px; border-radius: 10px; background: rgb(var(--fill) / 0.04); }
+.share-info > div { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.share-info .muted.small { min-width: 140px; }
+.share-info code { font-family: var(--mono, ui-monospace, monospace); font-size: 13px; overflow-wrap: anywhere; }
+.share-warn { margin-top: 8px; color: rgb(var(--warning)); }
+.share-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+.share-form .pole { flex: 1; min-width: 200px; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; border: 1px solid rgb(var(--fill) / 0.1); background: transparent; color: rgb(var(--ink-2)); cursor: pointer; }
+.icon-btn svg { width: 14px; height: 14px; }
+.share-form .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.share-form .seg-btn { white-space: nowrap; }
+@media (max-width: 720px) {
+  .share-form .seg { width: 100%; flex-wrap: wrap; overflow: visible; }
+  .share-form .seg-btn { flex: 1 1 auto; }
+  .share-form .btn { width: 100%; justify-content: center; }
 }

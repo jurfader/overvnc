@@ -1,10 +1,11 @@
-import { useState } from 'react';
-import { LogOut, Smartphone, Store } from 'lucide-react';
-import { api, errorMessage, type Agent } from '../../api.ts';
+import { useEffect, useState, type FormEvent } from 'react';
+import { Copy, FolderOpen, LogOut, Smartphone, Store } from 'lucide-react';
+import { api, errorMessage, type Agent, type ShareStatus } from '../../api.ts';
 import { Button, CardHead, Modal, toast } from '../../components.tsx';
 import { useMe } from '../../state.tsx';
 
 type Feature = 'phoneApp' | 'endButton';
+type ShareMode = Agent['shareMode'];
 
 const FEATURES: { key: Feature; icon: typeof Smartphone; title: string; on: string; off: string }[] = [
   {
@@ -23,26 +24,34 @@ const FEATURES: { key: Feature; icon: typeof Smartphone; title: string; on: stri
   },
 ];
 
-/** Kiosk: funkcje dla klientów — włączenie dopisuje je do trybu kiosku (Assigned Access) i menu Start. */
-export function KioskFeaturesCard({ agent, uwf }: { agent: Agent; uwf: boolean }) {
+const SHARE_MODES: { value: ShareMode; label: string }[] = [
+  { value: 'off', label: 'Wyłączone' },
+  { value: 'read', label: 'Tylko odczyt' },
+  { value: 'delete', label: 'Odczyt i usuwanie' },
+];
+
+/** Kiosk: funkcje dla klientów i pracowników — zapisywane w trybie kiosku (Assigned Access), menu Start i systemie. */
+export function KioskFeaturesCard({ agent, uwf, share }: { agent: Agent; uwf: boolean; share?: ShareStatus | null }) {
   const { can } = useMe();
-  const [busy, setBusy] = useState<Feature | null>(null);
+  const manage = can('agents.manage');
+  const [busy, setBusy] = useState<string | null>(null);
   // kiosk z ochroną przed zapisem: zapis zmiany = dwa restarty — najpierw pytamy
-  const [confirm, setConfirm] = useState<Feature | null>(null);
+  const [confirm, setConfirm] = useState<{ run: () => Promise<void> } | null>(null);
   const supported = !agent.online || agent.capabilities.includes('agent.profile');
-  const toggle = async (f: Feature) => {
-    setBusy(f);
+  const withConfirm = (run: () => Promise<void>) => (uwf && agent.online ? setConfirm({ run }) : void run());
+
+  const save = async (key: string, patch: Parameters<typeof api.updateAgent>[1], label: string) => {
+    setBusy(key);
     try {
-      const r = await api.updateAgent(agent.id, { [f]: !agent[f] });
-      const name = FEATURES.find((x) => x.key === f)!.title;
-      const base = `${name}: ${r[f] ? 'włączone' : 'wyłączone'}`;
-      toast(r.profileNote ? `${base}. ${r.profileNote}` : agent.online ? base : `${base} — kiosk zastosuje zmianę po połączeniu.`);
+      const r = await api.updateAgent(agent.id, patch);
+      toast(r.profileNote ? `${label}. ${r.profileNote}` : agent.online ? label : `${label} — kiosk zastosuje zmianę po połączeniu.`);
     } catch (e) {
       toast(errorMessage(e), 'err');
     } finally {
       setBusy(null);
     }
   };
+
   return (
     <section className="glass-card card anim-rise" style={{ animationDelay: '120ms' }}>
       <CardHead icon={Store} title="Funkcje kiosku" />
@@ -56,19 +65,20 @@ export function KioskFeaturesCard({ agent, uwf }: { agent: Agent; uwf: boolean }
               <strong>{f.title}</strong>
               <div className="small muted">{agent[f.key] ? f.on : f.off}</div>
             </div>
-            {can('agents.manage') && supported && (
+            {manage && supported && (
               <Button
                 size="sm"
                 variant={agent[f.key] ? 'secondary' : 'primary'}
                 loading={busy === f.key}
                 disabled={busy !== null}
-                onClick={() => (uwf && agent.online ? setConfirm(f.key) : toggle(f.key))}
+                onClick={() => withConfirm(() => save(f.key, { [f.key]: !agent[f.key] }, `${f.title}: ${agent[f.key] ? 'wyłączone' : 'włączone'}`))}
               >
                 {agent[f.key] ? 'Wyłącz' : 'Włącz'}
               </Button>
             )}
           </div>
         ))}
+        <ShareSection agent={agent} share={share} manage={manage && supported} busy={busy} setBusy={setBusy} save={save} withConfirm={withConfirm} />
       </div>
       {!supported && <p className="small muted">Wymaga agenta w wersji 0.20.0 lub nowszej — zaktualizuj agenta.</p>}
       <p className="small muted" style={{ marginBottom: 0 }}>
@@ -88,9 +98,9 @@ export function KioskFeaturesCard({ agent, uwf }: { agent: Agent; uwf: boolean }
           <Button
             variant="primary"
             onClick={() => {
-              const f = confirm!;
+              const c = confirm!;
               setConfirm(null);
-              void toggle(f);
+              void c.run();
             }}
           >
             Zapisz i uruchom ponownie
@@ -98,5 +108,145 @@ export function KioskFeaturesCard({ agent, uwf }: { agent: Agent; uwf: boolean }
         </div>
       </Modal>
     </section>
+  );
+}
+
+/** Udział sieciowy folderu Pobrane klienta — pracownicy przeglądają (i ewentualnie usuwają) pliki z innych komputerów. */
+function ShareSection({
+  agent,
+  share,
+  manage,
+  busy,
+  setBusy,
+  save,
+  withConfirm,
+}: {
+  agent: Agent;
+  share?: ShareStatus | null;
+  manage: boolean;
+  busy: string | null;
+  setBusy: (b: string | null) => void;
+  save: (key: string, patch: Parameters<typeof api.updateAgent>[1], label: string) => Promise<void>;
+  withConfirm: (run: () => Promise<void>) => void;
+}) {
+  const [mode, setMode] = useState<ShareMode>(agent.shareMode);
+  const [allow, setAllow] = useState(agent.shareAllow);
+  const [password, setPassword] = useState('');
+  useEffect(() => {
+    setMode(agent.shareMode);
+    setAllow(agent.shareAllow);
+  }, [agent.shareMode, agent.shareAllow]);
+  const dirty = mode !== agent.shareMode || (mode !== 'off' && allow.trim() !== agent.shareAllow);
+  const on = agent.shareMode !== 'off';
+  const ip = share?.addresses?.[0];
+  const path = ip ? `\\\\${ip}\\Pobrane` : null;
+  const login = share?.computer ? `${share.computer}\\pracownik` : null;
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    const label = mode === 'off' ? 'Udział Pobrane wyłączony' : `Udział Pobrane: ${mode === 'delete' ? 'odczyt i usuwanie' : 'tylko odczyt'}`;
+    withConfirm(() => save('share', { shareMode: mode, shareAllow: mode === 'off' ? '' : allow.trim() }, label));
+  };
+  const setPass = (e: FormEvent) => {
+    e.preventDefault();
+    const pw = password;
+    withConfirm(async () => {
+      setBusy('pass');
+      try {
+        const r = await api.setSharePassword(agent.id, pw);
+        setPassword('');
+        toast(r.note ? `Hasło ustawione. ${r.note}` : 'Hasło ustawione');
+      } catch (err) {
+        toast(errorMessage(err), 'err');
+      } finally {
+        setBusy(null);
+      }
+    });
+  };
+  const copy = (text: string) => navigator.clipboard.writeText(text).then(() => toast('Skopiowano'), () => toast('Nie udało się skopiować', 'err'));
+
+  return (
+    <div className="kiosk-feature kiosk-share">
+      <span className={`kiosk-feature-icon ${on ? 'on' : ''}`}>
+        <FolderOpen />
+      </span>
+      <div className="kiosk-feature-body">
+        <strong>Udostępnianie Pobranych pracownikom</strong>
+        <div className="small muted">
+          Pracownicy otwierają folder Pobrane klienta z innego komputera w sieci (konto „pracownik”). Dostęp tylko z sieci lokalnej — albo tylko z podanych adresów.
+        </div>
+
+        {on && share?.mode && path && login && (
+          <div className="share-info">
+            <div>
+              <span className="muted small">Adres w Eksploratorze</span>
+              <code>{path}</code>
+              <button type="button" className="icon-btn" onClick={() => copy(path)} title="Kopiuj adres">
+                <Copy />
+              </button>
+            </div>
+            <div>
+              <span className="muted small">Użytkownik</span>
+              <code>{login}</code>
+              <button type="button" className="icon-btn" onClick={() => copy(login)} title="Kopiuj nazwę użytkownika">
+                <Copy />
+              </button>
+            </div>
+            {share.addresses && share.addresses.length > 1 && <div className="small muted">Inne adresy kiosku: {share.addresses.slice(1).join(', ')}</div>}
+          </div>
+        )}
+        {!on && share?.mode && (
+          <div className="share-warn small">
+            Na kiosku działa udział „Pobrane” ustawiony poza panelem ({share.mode === 'delete' ? 'odczyt i usuwanie' : 'tylko odczyt'}). Wybierz tryb i zapisz, żeby zarządzać nim tutaj
+            — „Wyłączone” go usunie.
+          </div>
+        )}
+        {on && share && !share.userEnabled && <div className="share-warn small">Ustaw hasło konta „pracownik” — bez niego pracownicy nie zalogują się do udziału.</div>}
+        {on && agent.online && share && !share.mode && <div className="small muted">Udział jest zapisywany na kiosku…</div>}
+
+        {manage && (
+          <>
+            <form className="share-form" onSubmit={submit}>
+              <div className="seg" role="radiogroup" aria-label="Dostęp do Pobranych">
+                {SHARE_MODES.map((m) => (
+                  <button key={m.value} type="button" role="radio" aria-checked={mode === m.value} className={`seg-btn ${mode === m.value ? 'on' : ''}`} onClick={() => setMode(m.value)}>
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              {mode !== 'off' && (
+                <input
+                  className="pole"
+                  value={allow}
+                  onChange={(e) => setAllow(e.target.value)}
+                  placeholder="Dozwolone adresy — puste = cała sieć lokalna, np. 192.168.1.20"
+                  aria-label="Dozwolone adresy"
+                />
+              )}
+              <Button size="sm" variant="primary" loading={busy === 'share'} disabled={!dirty || busy !== null}>
+                Zapisz
+              </Button>
+            </form>
+            {on && (
+              <form className="share-form" onSubmit={setPass}>
+                <input
+                  className="pole"
+                  type="password"
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Nowe hasło konta „pracownik” (min. 8 znaków)"
+                  aria-label="Hasło konta pracownik"
+                  minLength={8}
+                />
+                <Button size="sm" loading={busy === 'pass'} disabled={password.length < 8 || busy !== null || !agent.online} title={agent.online ? undefined : 'Kiosk musi być online'}>
+                  Ustaw hasło
+                </Button>
+              </form>
+            )}
+          </>
+        )}
+      </div>
+    </div>
   );
 }

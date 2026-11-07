@@ -335,4 +335,10 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE agents ADD COLUMN offline_reason TEXT;
   `,
+
+  // 15 — kiosk: udział sieciowy folderu Pobrane dla pracowników (v0.21.0)
+  `
+  ALTER TABLE agents ADD COLUMN share_mode TEXT NOT NULL DEFAULT 'off';   -- off | read | delete
+  ALTER TABLE agents ADD COLUMN share_allow TEXT NOT NULL DEFAULT '';     -- adresy/sieci; puste = sieć lokalna
+  `,
 ];

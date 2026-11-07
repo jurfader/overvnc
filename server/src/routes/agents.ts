@@ -6,7 +6,7 @@ import { randomToken, sha256 } from '../crypto.ts';
 import { HttpError, parse } from '../errors.ts';
 import { actorOf, requireUser } from '../auth.ts';
 import { assertAgentAccess, assertPlacement, scopeSql } from '../scope.ts';
-import { pushProfile } from '../profile.ts';
+import { pushProfile, validAllowList } from '../profile.ts';
 
 const IdParams = z.object({ id: z.uuid() });
 const TagIds = z.array(z.number().int().positive()).max(100);
@@ -21,7 +21,16 @@ const PatchBody = z.object({
   phoneApp: z.boolean().optional(),
   // kiosk: przycisk „Zakończ i usuń moje dane”
   endButton: z.boolean().optional(),
+  // kiosk: udział Pobrane dla pracowników
+  shareMode: z.enum(['off', 'read', 'delete']).optional(),
+  shareAllow: z
+    .string()
+    .trim()
+    .max(500)
+    .refine(validAllowList, 'Podaj adresy IP lub sieci (np. 192.168.1.20, 192.168.1.0/24) oddzielone przecinkami.')
+    .optional(),
 });
+const SharePasswordBody = z.object({ password: z.string().min(8, 'Hasło musi mieć co najmniej 8 znaków.').max(127) });
 const BulkBody = z.object({
   ids: z.array(z.uuid()).min(1).max(1000),
   clientId: z.number().int().positive().nullable().optional(),
@@ -113,13 +122,15 @@ export async function agentRoutes(app: FastifyInstance, ctx: Ctx) {
   app.patch('/api/agents/:id', manage, async (req) => {
     const { id, clientId: curClient } = access(req);
     const body = parse(PatchBody, req.body);
-    const cur = db.prepare('SELECT label, notes, site_id, kind, phone_app, end_button FROM agents WHERE id = ?').get(id) as {
+    const cur = db.prepare('SELECT label, notes, site_id, kind, phone_app, end_button, share_mode, share_allow FROM agents WHERE id = ?').get(id) as {
       label: string;
       notes: string;
       site_id: number | null;
       kind: string;
       phone_app: number;
       end_button: number;
+      share_mode: string;
+      share_allow: string;
     };
 
     const clientId = body.clientId !== undefined ? body.clientId : curClient;
@@ -129,7 +140,9 @@ export async function agentRoutes(app: FastifyInstance, ctx: Ctx) {
     if (body.tagIds) assertTagsExist(body.tagIds);
 
     tx(db, () => {
-      db.prepare('UPDATE agents SET label = ?, notes = ?, client_id = ?, site_id = ?, kind = ?, phone_app = ?, end_button = ? WHERE id = ?').run(
+      db.prepare(
+        'UPDATE agents SET label = ?, notes = ?, client_id = ?, site_id = ?, kind = ?, phone_app = ?, end_button = ?, share_mode = ?, share_allow = ? WHERE id = ?',
+      ).run(
         body.label ?? cur.label,
         body.notes ?? cur.notes,
         clientId,
@@ -137,6 +150,8 @@ export async function agentRoutes(app: FastifyInstance, ctx: Ctx) {
         body.kind ?? cur.kind,
         body.phoneApp === undefined ? cur.phone_app : body.phoneApp ? 1 : 0,
         body.endButton === undefined ? cur.end_button : body.endButton ? 1 : 0,
+        body.shareMode ?? cur.share_mode,
+        body.shareAllow ?? cur.share_allow,
         id,
       );
       if (body.tagIds) {
@@ -150,7 +165,13 @@ export async function agentRoutes(app: FastifyInstance, ctx: Ctx) {
     // zmiana profilu: od razu do agenta (gdy offline — po połączeniu); uwaga agenta wraca do panelu
     let note: string | null = null;
     const changed = (v: boolean | undefined, was: number) => v !== undefined && (v ? 1 : 0) !== was;
-    if ((body.kind !== undefined && body.kind !== cur.kind) || changed(body.phoneApp, cur.phone_app) || changed(body.endButton, cur.end_button)) {
+    if (
+      (body.kind !== undefined && body.kind !== cur.kind) ||
+      changed(body.phoneApp, cur.phone_app) ||
+      changed(body.endButton, cur.end_button) ||
+      (body.shareMode !== undefined && body.shareMode !== cur.share_mode) ||
+      (body.shareAllow !== undefined && body.shareAllow !== cur.share_allow)
+    ) {
       try {
         note = await pushProfile(db, hub, id);
       } catch (e) {
@@ -158,6 +179,17 @@ export async function agentRoutes(app: FastifyInstance, ctx: Ctx) {
       }
     }
     return { ...hub.summary(id), profileNote: note };
+  });
+
+  // hasło konta „pracownik” do udziału Pobrane — tylko przekazywane do kiosku, serwer go nie zapisuje
+  app.post('/api/agents/:id/share-password', manage, async (req) => {
+    const { id } = access(req);
+    const { password } = parse(SharePasswordBody, req.body);
+    const kind = (db.prepare('SELECT kind FROM agents WHERE id = ?').get(id) as { kind: string }).kind;
+    if (kind !== 'kiosk') throw new HttpError(409, 'not_kiosk', 'Udział Pobrane jest funkcją kiosku.');
+    const r = await hub.request<{ note?: string }>(id, 'kiosk.sharepass', { password }, { timeoutMs: 150_000, capability: 'kiosk.sharepass' });
+    audit(db, actorOf(req), 'kiosk.share_password', id, null, req.ip);
+    return { ok: true, note: r?.note || null };
   });
 
   app.post('/api/agents/bulk', manage, async (req) => {

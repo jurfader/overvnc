@@ -72,6 +72,7 @@ const ACTIONS: Record<string, [string, Tone]> = {
   'desktop.sas': ['Ctrl+Alt+Del na pulpicie zdalnym', 'warning'],
   'desktop.take': ['Przejęcie sterowania pulpitem', 'neutral'],
   'kiosk.session_end': ['Klient zakończył sesję (dane usunięte)', 'info'],
+  'kiosk.share_password': ['Hasło do udziału Pobrane zmienione', 'brand'],
 };
 
 export function Audit() {

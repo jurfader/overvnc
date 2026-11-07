@@ -50,6 +50,7 @@ Kanał otwiera serwer poleceniem (np. `term.open` z polem `channel`). Odbiorcę 
 | `hello` | zaraz po połączeniu | `{ version, protocol, capabilities: string[], inventory }` |
 | `metrics` | co 15 s | `Metrics` (CPU, RAM, dyski, sieć, uptime, zalogowani) |
 | `inventory` | co 6 h | `Inventory` (system, sprzęt, dyski, sieć, oprogramowanie; od 0.19.0 także `security`) |
+| `kiosk.sharepass` `{password}` (polecenie) | 0.21.0 | hasło konta „pracownik” do udziału Pobrane; agent trzyma je zaszyfrowane DPAPI (klucz komputera) do zapisu — przy UWF zadaniem z restartami; serwer go nie zapisuje (`POST /api/agents/:id/share-password`) |
 | `bye` `{reason}` | przy planowanym końcu pracy (od 0.20.1) | `shutdown` (wyłączenie/restart systemu — sygnał menedżera usług), `stopped` (zatrzymanie usługi), `update` (aktualizacja agenta). Serwer zapisuje powód rozłączenia (`agents.offline_reason`, bez pożegnania: `lost`); reguła „Komputer offline” domyślnie pomija planowo wyłączone (próg 1 = zgłaszaj także je) |
 | `security` | co 1 h i po wyszukaniu aktualizacji (od 0.19.0) | `Security`: antywirus (Defender + produkty z Centrum zabezpieczeń), zapora, szyfrowanie (BitLocker/FileVault), aktualizacje (Windows Update / `softwareupdate`, wyszukiwane w tle co 12 h), macOS: Gatekeeper, SIP. Ocena (krytyczne / ostrzeżenia / informacje) jest na serwerze (`security.ts`); serwer porównuje też kolejne inwentarze i zapisuje historię zmian (`agent_changes`: programy, system, sprzęt, zabezpieczenia) |
 
@@ -78,7 +79,7 @@ W `hello` agent wysyła listę obsługiwanych poleceń. Serwer odrzuca polecenie
 | Polecenie | Od wersji | Opis |
 |---|---|---|
 | `inventory.refresh` | 0.2.0 | zbiera i zwraca pełny inwentarz |
-| `agent.profile` `{kiosk, phoneApp, endButton}` | 0.20.0 | profil komputera (zwykły / kiosk) — serwer wysyła go po każdym połączeniu i po zmianie w panelu; agent zapisuje go w `profile.json` obok konfiguracji (funkcje kiosku działają też offline). Na Windows włączenie `phoneApp`: aplikacja w `AllowedApps` trybu kiosku (Assigned Access przez most WMI-MDM), kafelek „Zdjęcia z telefonu” w Start, `http://127.0.0.1` w `URLAllowlist` przeglądarki, jeśli ma listę blokad; odpowiedź `{ok, note}` z uwagą dla panelu (np. UWF włączony). |
+| `agent.profile` `{kiosk, phoneApp, endButton, shareMode, shareAllow}` | 0.20.0 (udział od 0.21.0) | profil komputera (zwykły / kiosk) — serwer wysyła go po każdym połączeniu i po zmianie w panelu; agent zapisuje go w `profile.json` obok konfiguracji (funkcje kiosku działają też offline). Na Windows włączenie `phoneApp`: aplikacja w `AllowedApps` trybu kiosku (Assigned Access przez most WMI-MDM), kafelek „Zdjęcia z telefonu” w Start, `http://127.0.0.1` w `URLAllowlist` przeglądarki, jeśli ma listę blokad; odpowiedź `{ok, note}` z uwagą dla panelu (np. UWF włączony). |
 | `term.open` `{channel, cols, rows, shell}` | 0.4.0 | powłoka w PTY (ConPTY na Windows); limit 8 sesji na komputer |
 | `term.resize` `{channel, cols, rows}` | 0.4.0 | zmiana rozmiaru terminala |
 | `channel.close` `{channel}` | 0.4.0 | zamyka kanał (zabija proces) |

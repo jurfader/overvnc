@@ -253,7 +253,7 @@ export function MachineDetail({ id, live, tab = 'overview', filePath = null }: {
         </section>
 
         {remote && <KioskCard agent={a} />}
-        {a.kind === 'kiosk' && a.os === 'windows' && <KioskFeaturesCard agent={a} uwf={!!inv?.windows?.uwf?.enabled} />}
+        {a.kind === 'kiosk' && a.os === 'windows' && <KioskFeaturesCard agent={a} uwf={!!inv?.windows?.uwf?.enabled} share={inv?.windows?.share} />}
         {inv?.windows && <WindowsCard agent={a} win={inv.windows} />}
 
         <section className="glass-card card anim-rise" style={{ animationDelay: '140ms' }}>

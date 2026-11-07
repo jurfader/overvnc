@@ -16,6 +16,7 @@ type WinStatus struct {
 	UWF      *UWFStatus       `json:"uwf,omitempty"`
 	Task     *KioskTask       `json:"task,omitempty"`     // zadanie w toku
 	LastTask *KioskTaskResult `json:"lastTask,omitempty"` // wynik ostatniego zadania
+	Share    *ShareStatus     `json:"share,omitempty"`    // kiosk: udział sieciowy folderu Pobrane
 }
 
 type WinLicense struct {
